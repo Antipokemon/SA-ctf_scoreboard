@@ -7,7 +7,7 @@ require([
 
     var defaultTokens = mvc.Components.get("default");
     var submittedTokens = mvc.Components.get("submitted");
-    var endpoint = "/en-US/splunkd/__raw/servicesNS/nobody/SA-ctf_registration/ctf_registration/events";
+    var endpoint = "/en-US/splunkd/__raw/services/ctf_registration/events";
 
     function setToken(name, value) {
         defaultTokens.set(name, value);
@@ -86,75 +86,22 @@ require([
 
             var registration = selected.registration || {};
 
-            setToken(
-                "ctf_id",
-                selected.ctf_id || ""
-            );
-
-            setToken(
-                "ctf_event_name",
-                selected.name || selected.ctf_id || ""
-            );
-
-            setToken(
-                "ctf_event_starts",
-                selected.event_starts || ""
-            );
-
-            setToken(
-                "ctf_event_ends",
-                selected.event_ends || ""
-            );
-
-            setToken(
-                "ctf_registration_state",
-                selected.registration_state || ""
-            );
-
-            setToken(
-                "ctf_event_state",
-                selected.event_state || ""
-            );
-
-            setToken(
-                "ctf_user",
-                data.username ||
-                registration.Username ||
-                ""
-            );
-
-            setToken(
-                "ctf_DisplayUsername",
-                registration.DisplayUsername ||
-                data.username ||
-                ""
-            );
-
-            setToken(
-                "ctf_Team",
-                registration.Team ||
-                registration.DisplayUsername ||
-                data.username ||
-                ""
-            );
-
-            setToken(
-                "ctf_SearchUrl",
-                selected.search_url || ""
-            );
-
-            setToken(
-                "ctf_context_ready",
-                "1"
-            );
+            setToken("ctf_id", selected.ctf_id || "");
+            setToken("ctf_event_name", selected.name || selected.ctf_id || "");
+            setToken("ctf_event_starts", selected.event_starts || "");
+            setToken("ctf_event_ends", selected.event_ends || "");
+            setToken("ctf_registration_state", selected.registration_state || "");
+            setToken("ctf_event_state", selected.event_state || "");
+            setToken("ctf_user", data.username || registration.Username || "");
+            setToken("ctf_DisplayUsername", registration.DisplayUsername || data.username || "");
+            setToken("ctf_Team", registration.Team || registration.DisplayUsername || data.username || "");
+            setToken("ctf_SearchUrl", selected.search_url || "");
+            setToken("ctf_context_ready", "1");
         })
         .fail(function(xhr) {
             fail(
                 "Unable to load your CTF registration context: " +
-                (
-                    xhr.responseText ||
-                    xhr.statusText
-                )
+                (xhr.responseText || xhr.statusText)
             );
         });
 });
