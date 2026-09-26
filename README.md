@@ -1,242 +1,453 @@
-# SA-ctf_scoreboard — Splunk Enterprise 10.4 compatibility fork
+# Capture the Flag
 
-This repository is a compatibility-maintenance fork of Splunk's deprecated
-`SA-ctf_scoreboard` app. It targets **Splunk Enterprise 10.4** while preserving
-the original app name, dashboard routes, KV Store names, indexes, scoring event
-fields, and compatibility with the companion `SA-ctf_scoreboard_admin` app.
+`SA-ctf_scoreboard` is the participant-facing Capture the Flag application. This repository modernizes the original Splunk CTF scoreboard for Splunk Enterprise 10.4 and adds event scoping required for multiple CTFs to run concurrently.
 
-The original project was last updated for Splunk 8.2.x in January 2022. This
-fork fixes the participant/scoreboard app for the Python and Simple XML changes
-that matter on Splunk Enterprise 10.4.
+The app handles:
 
-## What changed
+- participant welcome and event context
+- questions
+- answer submission
+- hint display and purchase
+- participant/team score events
+- participant scoring dashboards
+- CTF-specific question selection
 
-- Rewrote the custom controller for Python 3.9/3.13.
-- Removed runtime dependence on the old bundled `splunklib`, `httplib2`, and
-  other stale vendored packages for the active participant/scoring paths.
-- Rewrote `getanswer`, `gethints`, and `validateevents` using Splunk's built-in
-  legacy `Intersplunk` command protocol (`chunked = false`).
-- Added `python.required = 3.9,3.13` to custom command definitions.
-- Fixed the Python 3 HMAC/bytes conversion in `validatectf.py`.
-- Fixed `decodeTCode()` and added constant-time validation support.
-- Fixed Python 3 URL encoding; values are encoded as text rather than passing
-  bytes to `urllib.parse.quote()`.
-- Added safe log-directory creation and duplicate-handler protection.
-- Fixed the historical uninitialized `found_question` path in score adjustment.
-- Restored actual `validateevents` verification instead of the old macro that
-  unconditionally set `Validated="1"`.
-- During build, every Simple XML `<dashboard>` / `<form>` is certified with
-  `version="1.1"` for jQuery 3.5+.
-- Pins the upstream source commit so builds are reproducible.
+## Requirements
 
-## Important scope note
+- Splunk Enterprise 10.4
+- `SA-ctf_scoreboard_admin`
+- `SA-ctf_registration`
+- A configured scoreboard service account
+- Splunk roles:
+  - `ctf_competitor` for participants
+  - `ctf_admin` for CTF administrators
+  - `ctf_answers_service` for the privileged answer/service account
+- Python 3 as provided by Splunk 10.4
+- The `scoreboard` and `scoreboard_admin` indexes
+- CTF content containing a valid `ctf_id`
 
-This repository fixes **SA-ctf_scoreboard**. The original solution also
-requires the companion **SA-ctf_scoreboard_admin** application because answers
-and hints are intentionally kept there. That admin app is a separate project
-and should receive its own Splunk 10.4 compatibility pass before production
-use.
+The modernized app does not depend on the historical bundled Python 2 SDK.
 
-The upstream participant app also contained an old generated Python dependency
-tree under `bin/sa_ctf_scoreboard/`, primarily associated with obsolete add-on
-builder scaffolding/e-badge automation. The default 10.4 build removes that
-stale dependency tree. Core gameplay — users/teams, questions, answers, hints,
-scoring, bonus submissions, score adjustments, and dashboards — does not rely
-on it. Use `--keep-vendored-libs` only if you are deliberately testing legacy
-functionality that needs those files.
+## App identity
 
-## Repository layout
-
-The GitHub repository contains the maintained compatibility files plus a
-reproducible builder. The builder downloads the pinned final upstream source,
-applies these files, patches all Simple XML dashboards, removes obsolete Python
-vendor trees, and creates an installable Splunk app tarball.
+App ID:
 
 ```text
-SA-ctf_scoreboard-10.4/
-├── appserver/controllers/
-│   ├── scoreboard_controller.py
-│   └── scoreboard_controller.config.example
-├── bin/
-│   ├── _ctf_common.py
-│   ├── getanswer.py
-│   ├── gethints.py
-│   ├── validatectf.py
-│   └── validateevents.py
-├── default/
-│   ├── app.conf
-│   ├── commands.conf
-│   └── macros.conf
-├── tools/build_from_upstream.py
-├── tests/
-├── .github/workflows/validate.yml
-├── Makefile
-├── VERSION
-└── LICENSE
+SA-ctf_scoreboard
 ```
 
-## Build the complete installable app
-
-Requires Python 3.9+ and Internet access to GitHub.
-
-```bash
-make package
-```
-
-The result is:
+Display name:
 
 ```text
-dist/SA-ctf_scoreboard-10.4.1.tar.gz
+Capture the Flag
 ```
 
-The tarball contains the **complete app**, including all original dashboards,
-CSS, JavaScript, lookup definitions, metadata, icons, and static resources,
-with the 10.4 compatibility overlay applied.
+## Service account configuration
 
-To retain the old upstream vendored Python libraries for troubleshooting:
+Create:
 
-```bash
-python3 tools/build_from_upstream.py --keep-vendored-libs
+```text
+appserver/controllers/scoreboard_controller.config
 ```
 
-That is not recommended for Splunk 10.4.
+from:
 
-## Test before packaging
-
-```bash
-make test
+```text
+appserver/controllers/scoreboard_controller.config.example
 ```
 
-The local test suite checks Python syntax, HMAC/tcode behavior, command config,
-forbidden legacy dependencies in the maintained files, and Simple XML patching.
-The GitHub Actions workflow performs the same checks and then builds the full
-artifact.
-
-## Install on Splunk Enterprise 10.4
-
-Copy the generated tarball to your Splunk server, then install it from Splunk
-Web or extract it under `$SPLUNK_HOME/etc/apps`:
-
-```bash
-cd $SPLUNK_HOME/etc/apps
-tar -xzf /path/to/SA-ctf_scoreboard-10.4.1.tar.gz
-```
-
-Create the log directory if it does not already exist. The rewritten controller
-also creates it automatically when loaded.
-
-```bash
-mkdir -p $SPLUNK_HOME/var/log/scoreboard
-chown -R splunk:splunk $SPLUNK_HOME/var/log/scoreboard
-```
-
-Create the service account used to retrieve protected answers/hints. Keep the
-permissions from the original scoreboard design; do not give competitors read
-access to the answer collection.
-
-```bash
-$SPLUNK_HOME/bin/splunk add user svcaccount \
-  -password '<STRONG_PASSWORD>' \
-  -role ctf_answers_service \
-  -auth admin:'<ADMIN_PASSWORD>'
-```
-
-Configure the controller:
-
-```bash
-cd $SPLUNK_HOME/etc/apps/SA-ctf_scoreboard/appserver/controllers
-cp scoreboard_controller.config.example scoreboard_controller.config
-openssl rand -hex 32
-```
-
-Edit `scoreboard_controller.config`:
+Example:
 
 ```ini
 [ScoreboardController]
 USER = svcaccount
-PASS = <STRONG_PASSWORD>
-VKEY = <OUTPUT_FROM_OPENSSL_RAND>
+PASS = REPLACE_WITH_PASSWORD
+VKEY = REPLACE_WITH_RANDOM_VALIDATION_KEY
 ```
 
-Protect the file:
+Do not commit the real password or validation key.
 
-```bash
-chmod 600 scoreboard_controller.config
-chown splunk:splunk scoreboard_controller.config
+The service account requires access to the protected answer data and the CTF registration data used to resolve participant/team membership.
+
+## Multi-CTF model
+
+All event-specific content and scoring must be associated with a stable:
+
+```text
+ctf_id
 ```
 
-Restart Splunk:
+Examples:
 
-```bash
-$SPLUNK_HOME/bin/splunk restart
+```text
+asteron-easy-2026
+asteron-medium-2026
+holiday-hunt-2026
 ```
 
-## 10.4 checks after install
+Question identity is:
 
-Verify the controller loaded:
-
-```bash
-ls -l $SPLUNK_HOME/var/log/scoreboard/
-tail -50 $SPLUNK_HOME/var/log/scoreboard/scoreboard.log
-tail -50 $SPLUNK_HOME/var/log/scoreboard/scoreboard_admin.log
+```text
+ctf_id + Number
 ```
 
-Verify the custom commands are registered:
+not simply:
+
+```text
+Number
+```
+
+This means two CTFs can both have Question 1 without colliding.
+
+### Event-scoped data
+
+The following data must carry `ctf_id` where applicable:
+
+```text
+ctf_questions
+ctf_answers
+ctf_hints
+ctf_hint_entitlements
+scoreboard events
+scoreboard_admin events
+ctf_registrations
+```
+
+## Relationship to registration
+
+`SA-ctf_registration` is the source of participant-to-event registration.
+
+A registration is uniquely identified by:
+
+```text
+ctf_id + Username
+```
+
+The participant app loads the selected CTF context and obtains values including:
+
+```text
+ctf_id
+ctf_event_name
+ctf_event_starts
+ctf_event_ends
+ctf_user
+ctf_DisplayUsername
+ctf_Team
+ctf_SearchUrl
+```
+
+If the user belongs to multiple CTFs, a CTF can be selected with:
+
+```text
+/en-US/app/SA-ctf_scoreboard/questions?ctf_id=asteron-easy-2026
+```
+
+## Preparing a CTF for the scoreboard
+
+Creating an event in `SA-ctf_registration` does not create questions, answers, or hints automatically.
+
+For each CTF:
+
+1. create the CTF in `SA-ctf_registration`
+2. note the exact `ctf_id`
+3. prepare questions using that same `ctf_id`
+4. prepare answers using that same `ctf_id`
+5. prepare hints using that same `ctf_id`
+6. load the content into the appropriate KV Store collections
+7. verify participants can register
+8. verify the questions page returns only the selected CTF's questions
+
+## Questions
+
+Questions live in:
+
+```text
+ctf_questions
+```
+
+Required event-scoped fields include:
+
+```text
+ctf_id
+Number
+Question
+StartTime
+EndTime
+BasePoints
+AdditionalBonusPoints
+AdditionalBonusInstructions
+```
+
+Example:
+
+```csv
+ctf_id,Number,Question,StartTime,EndTime,BasePoints,AdditionalBonusPoints,AdditionalBonusInstructions
+asteron-easy-2026,1,"What host was initially compromised?",1791806400,1791982800,100,0,""
+```
+
+`Number` only needs to be unique inside a single `ctf_id`.
+
+## Question scoring times
+
+`StartTime` and `EndTime` are question-scoring times and are distinct from the CTF registration/event times managed by `SA-ctf_registration`.
+
+Use them to control when a question can award normal time-based points.
+
+The CTF itself is bounded by:
+
+```text
+event_starts
+event_ends
+```
+
+in the registration app.
+
+A question is bounded by:
+
+```text
+StartTime
+EndTime
+```
+
+in `ctf_questions`.
+
+These should normally fit inside the parent event window.
+
+## Answer submission
+
+The question form submits:
+
+```text
+ctf_id
+Number
+Question
+Answer
+```
+
+The controller validates the answer against the answer record having the same:
+
+```text
+ctf_id + Number
+```
+
+Score events written to the scoreboard indexes also include `ctf_id`.
+
+This prevents answer or score data from one event being used by another event with the same question number.
+
+## Hints
+
+Hints are scoped by:
+
+```text
+ctf_id + Number + HintNumber
+```
+
+Hint entitlements also include `ctf_id`.
+
+A hint purchased for one CTF does not grant the same numbered hint in another CTF.
+
+## Participant workflow
+
+1. Register for the CTF in **Capture the Flag Registration**.
+2. Receive the required `ctf_competitor` role.
+3. Open **Capture the Flag**.
+4. Select/open the intended `ctf_id`.
+5. View questions for only that event.
+6. Submit answers and purchase hints.
+7. Score events are written with the selected `ctf_id`.
+
+## Starting a CTF
+
+Before event start:
+
+1. verify the registration event is enabled
+2. verify participants are registered
+3. verify the `ctf_id` in registration exactly matches the content
+4. verify questions exist for the event
+5. verify answers exist for the event
+6. verify hints, if used, exist for the event
+7. verify question StartTime/EndTime values
+8. verify the event starts/ends values in `SA-ctf_registration`
+9. verify the participant can open the questions page with the correct event
+
+Recommended validation search:
 
 ```spl
-| makeresults
-| eval tcode="3130", user="test", Number="1", Result="Correct", BasePointsAwarded="0", SpeedBonusAwarded="0", AdditionalBonusAwarded="0", Penalty="0", vcode="invalid"
-| validateevents
+| inputlookup ctf_questions
+| stats count min(StartTime) as earliest_question max(EndTime) as latest_question by ctf_id
 ```
 
-`Validated` should be `0` for the deliberately invalid signature.
+## Running concurrent CTFs
 
-Then test the actual workflow with a non-admin competitor account:
+Concurrent events are supported by scoping all data and searches to `ctf_id`.
 
-1. Open **Capture the Flag**.
-2. Accept the user agreement if your event uses it.
-3. Open a question.
-4. Submit an incorrect answer and confirm the result/penalty is recorded.
-5. Submit a correct answer and confirm base/speed points are recorded.
-6. Purchase a hint and confirm it becomes visible only to that team.
-7. Expand submission history and confirm protected submitted answers are visible
-   only to members of that team.
-8. Confirm the public scoreboard updates.
+Example:
 
-## Splunk 10.4 CherryPy setting
+```text
+asteron-easy-2026 / Question 1
+asteron-hard-2026 / Question 1
+```
 
-Splunk Enterprise 10.4 still enables custom CherryPy controllers by default,
-but Splunk has deprecated them for a future release. This app still uses a
-controller because that is how the original scoreboard securely separates
-competitor requests from the protected answers/hints store.
+are separate questions.
 
-If your instance has proactively disabled custom controllers, this app's
-submission endpoints will return 404. Check the appserver security setting in
-`web-features.conf` and ensure custom CherryPy controllers are not disabled for
-the host running this CTF.
+Do not load event-specific records without `ctf_id`; unscoped rows can cause incomplete or ambiguous behavior.
 
-This fork is therefore a **Splunk 10.4 compatibility target**, not a guarantee
-for a future Splunk release that removes CherryPy controllers entirely.
+## Closing a CTF
 
-## Push this repository to GitHub
+At the end of a CTF:
+
+1. allow the registration event's `event_ends` time to pass
+2. close registration if it has not already closed
+3. confirm no new participant workflow should use that `ctf_id`
+4. retain the historical question and score data for investigations/reporting
+5. archive/export data if required by your event process
+6. disable the event in `SA-ctf_registration` when it should no longer appear to users
+
+Do not reuse the old `ctf_id` for another event.
+
+## Indexes
+
+Participant score events:
+
+```text
+index=scoreboard
+```
+
+Protected/admin score events:
+
+```text
+index=scoreboard_admin
+```
+
+Example event-scoped search:
+
+```spl
+index=scoreboard ctf_id="asteron-easy-2026"
+| stats sum(BasePointsAwarded) as BasePoints
+        max(SpeedBonusAwarded) as SpeedBonus
+        sum(Penalty) as Penalty
+  by Team Number
+```
+
+## KV Store collections
+
+Participant app collections include:
+
+```text
+ctf_questions
+ctf_hint_entitlements
+ctf_badges
+ctf_badge_entitlements
+ctf_stealth
+ctf_eulas
+ctf_eulas_accepted
+```
+
+`ctf_questions` and `ctf_hint_entitlements` are event-scoped.
+
+Registration data is owned by:
+
+```text
+SA-ctf_registration
+```
+
+and should not be replaced with a single global `ctf_users` row when running multiple concurrent events.
+
+## Important multi-CTF files
+
+```text
+bin/_ctf_common.py
+bin/getanswer.py
+bin/gethints.py
+appserver/controllers/scoreboard_controller.py
+appserver/static/ctf_event_context.js
+default/collections.conf
+default/transforms.conf
+default/data/ui/views/questions.xml
+default/data/ui/views/question.xml
+```
+
+## Splunk 10.4 compatibility
+
+The compatibility branch includes Python 3-safe custom search commands and controller code.
+
+Custom commands should remain configured with:
+
+```ini
+chunked = false
+enableheader = true
+passauth = true
+python.required = 3.9,3.13
+```
+
+where session-key access is required by the command.
+
+## Logs
+
+Scoreboard logs:
+
+```text
+$SPLUNK_HOME/var/log/scoreboard/scoreboard.log
+$SPLUNK_HOME/var/log/scoreboard/scoreboard_admin.log
+```
+
+Rootless Podman example:
 
 ```bash
-git init
-git add .
-git commit -m "feat: Splunk 10.4 compatibility fork"
-git branch -M main
-git remote add origin git@github.com:<YOUR_USER>/<YOUR_REPO>.git
-git push -u origin main
+podman exec -u splunk splunk \
+  tail -f /opt/splunk/var/log/scoreboard/scoreboard.log
 ```
 
-The included GitHub Actions workflow validates every push. You can create a
-release from the generated `dist/SA-ctf_scoreboard-10.4.1.tar.gz` artifact.
+## Troubleshooting
 
-## Upstream
+### No questions appear
 
-Original project: https://github.com/splunk/SA-ctf_scoreboard
+Verify:
 
-Pinned source commit used by this build:
-`bef2d5cb254b0d6d4699f4f445e6fc914a35ceed`
+```spl
+| inputlookup ctf_questions
+| search ctf_id="YOUR-CTF-ID"
+```
 
-The original app and this compatibility work retain the upstream CC0 license.
+Then verify the browser URL/event context is using the same `ctf_id`.
+
+### User is not recognized as registered
+
+Verify the registration exists in `SA-ctf_registration` for:
+
+```text
+ctf_id + Username
+```
+
+and that its status is registered.
+
+### Answer is never correct
+
+Verify the answer collection in `SA-ctf_scoreboard_admin` contains the same:
+
+```text
+ctf_id
+Number
+```
+
+as the question.
+
+### Hints do not appear
+
+Verify both:
+
+```text
+ctf_id
+Number
+```
+
+match between the question and hint data.
+
+### Old JavaScript is still loaded
+
+Splunk Web and the browser may cache static assets. Restart Splunk after deployment and use a private browser window when validating static changes.
+
+## Related apps
+
+- `SA-ctf_registration` — CTF definitions, time windows, participant registration, and role assignment
+- `SA-ctf_scoreboard_admin` — answers, hints, content administration, and CTF administration
