@@ -4,13 +4,8 @@ require([
     "splunkjs/mvc",
     "splunkjs/mvc/utils",
     "splunkjs/mvc/searchmanager",
-    "bootstrap.popover",
-    "bootstrap.tooltip",
     "splunkjs/mvc/simplexml/ready!"
 ], function(_, $, mvc, utils, SearchManager) {
-
-    $("[data-toggle=popover]").popover();
-    $("[data-toggle=tooltip]").tooltip();
 
     var tokens = mvc.Components.get("default");
     var envTokens = mvc.Components.get("env");
