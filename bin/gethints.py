@@ -2,9 +2,19 @@
 from __future__ import annotations
 
 import json
+
 import splunk.Intersplunk as intersplunk
 
-from _ctf_common import ADMIN_APP, APP, current_username, kv, privileged_session_key, setup_logger, user_to_team
+from _ctf_common import (
+    ADMIN_APP,
+    APP,
+    REGISTRATION_APP,
+    current_username,
+    kv,
+    privileged_session_key,
+    registrations_to_team,
+    setup_logger,
+)
 
 MASKED = "Your team has not purchased this hint yet!"
 
@@ -18,36 +28,74 @@ def main() -> None:
             raise RuntimeError("Splunk did not provide a session key to gethints")
 
         username = current_username(caller_key)
-        users = kv("ctf_users", caller_key, app=APP)
-        teams = user_to_team(users)
-        myteam = teams.get(username, username)
-
         privileged_key = privileged_session_key()
-        hints = kv("ctf_hints", privileged_key, app=ADMIN_APP)
-        entitlements = kv("ctf_hint_entitlements", caller_key, app=APP)
+
+        ctf_ids = {
+            str(record.get("ctf_id", ""))
+            for record in records
+            if str(record.get("ctf_id", ""))
+        }
+        if len(ctf_ids) != 1:
+            raise RuntimeError("gethints requires exactly one ctf_id in the input records")
+
+        ctf_id = next(iter(ctf_ids))
+
+        registrations = kv(
+            "ctf_registrations",
+            privileged_key,
+            app=REGISTRATION_APP,
+        )
+        teams = registrations_to_team(registrations, ctf_id)
+        myteam = teams.get(username)
+        if not myteam:
+            raise RuntimeError(f"User {username} is not registered for CTF {ctf_id}")
+
+        hints = [
+            row
+            for row in kv("ctf_hints", privileged_key, app=ADMIN_APP)
+            if str(row.get("ctf_id", "")) == ctf_id
+        ]
+        entitlements = [
+            row
+            for row in kv("ctf_hint_entitlements", caller_key, app=APP)
+            if str(row.get("ctf_id", "")) == ctf_id
+        ]
 
         purchased = {
-            (str(row.get("Number", "")), str(row.get("HintNumber", "")))
+            (
+                str(row.get("ctf_id", "")),
+                str(row.get("Number", "")),
+                str(row.get("HintNumber", "")),
+            )
             for row in entitlements
-            if teams.get(str(row.get("user", "")), str(row.get("user", ""))) == myteam
+            if teams.get(str(row.get("user", ""))) == myteam
         }
 
         for record in records:
             number = str(record.get("Number", ""))
             available = []
             received = 0
+
             for hint in hints:
                 if str(hint.get("Number", "")) != number:
                     continue
+
                 cleaned = dict(hint)
-                key = (number, str(hint.get("HintNumber", "")))
+                key = (
+                    ctf_id,
+                    number,
+                    str(hint.get("HintNumber", "")),
+                )
+
                 if key in purchased:
                     received += 1
                 else:
                     cleaned["Hint"] = MASKED
-                # Preserve the original app's JSON-in-a-multivalue-field contract;
-                # question.xml uses mvexpand + spath on these values.
-                available.append(json.dumps(cleaned, ensure_ascii=False, separators=(",", ":")))
+
+                available.append(
+                    json.dumps(cleaned, ensure_ascii=False, separators=(",", ":"))
+                )
+
             record["Hints"] = available
             record["HintsAvailable"] = len(available)
             record["HintsReceived"] = received

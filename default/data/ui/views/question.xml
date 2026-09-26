@@ -1,0 +1,147 @@
+<dashboard version="1.1" hideEdit="true" hideTitle="true" script="ctf_event_context.js,table_icons_inline.js,custom_table_row_expansion.js" stylesheet="table_decorations.css" theme="dark">
+  <label>question</label>
+
+  <row>
+    <panel>
+      <html>
+        <div id="ctf-context-error" style="display:none;padding:12px;border:1px solid #d9534f;margin-bottom:12px;"></div>
+        <table>
+          <tr>
+            <td width="20%">
+              <img height="485" width="101" src="/static/app/SA-ctf_scoreboard/ctflogo.png"/>
+            </td>
+            <td>
+              <h2>$ctf_event_name$</h2>
+              <h1>Submit an Answer to Question $Number$</h1>
+            </td>
+          </tr>
+        </table>
+
+        <div style="padding:10px;border:1px dotted black;">
+          <h3>$Question$</h3>
+        </div>
+
+        <form action="/en-US/custom/SA-ctf_scoreboard/scoreboard_controller/submit_question" method="get">
+          <input type="hidden" id="ctf_id" name="ctf_id" value="$ctf_id$"/>
+          <input type="hidden" id="Number" name="Number" value="$Number$"/>
+          <input type="hidden" id="Question" name="Question" value="$Question$"/>
+          <b>Answer: </b>
+          <input type="text" id="Answer" name="Answer"/>
+          <input type="submit" value="Submit"/>
+        </form>
+
+        <h2>Tips and Tricks</h2>
+        <ul>
+          <li>Answers are case <b>in</b>sensitive.</li>
+          <li>Leading and trailing whitespace is stripped.</li>
+          <li>Answers are intended to be short and concise.</li>
+        </ul>
+      </html>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <html>
+        <div style="padding:10px;border:1px dotted black;">
+          <h3>Submission History</h3>
+          <h4>Click "&gt;" below to see your team's entire submission history for this question.</h4>
+        </div>
+      </html>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <table id="table1">
+        <search>
+          <query>
+index=scoreboard ctf_id="$ctf_id$" Team="$ctf_Team$" NOT Result=Hint
+| stats count as Attempts
+        max(BasePointsAwarded) as BasePointsEarned
+        max(SpeedBonusAwarded) as BonusPointsEarned
+        sum(Penalty) as PenaltyPoints
+        count(eval(Result=="Incorrect")) as IncorrectAttempts
+        count(eval(Result=="Correct")) as CorrectAttempts
+        by ctf_id Number
+| append
+    [ | inputlookup ctf_questions
+      | search ctf_id="$ctf_id$"
+      | eval Attempts=0, IncorrectAttempts=0, CorrectAttempts=0
+      | fields ctf_id Number Question BasePoints Attempts CorrectAttempts IncorrectAttempts ]
+| gethints
+| stats last(BasePoints) as BasePointsAvailable
+        last(BasePointsEarned) as BasePointsEarned
+        last(BonusPointsEarned) as BonusPointsEarned
+        sum(PenaltyPoints) as PenaltyPoints
+        sum(Attempts) as Attempts
+        sum(IncorrectAttempts) as IncorrectAttempts
+        sum(CorrectAttempts) as CorrectAttempts
+        last(HintsAvailable) as HintsAvailable
+        last(HintsReceived) as HintsReceived
+        by ctf_id Number
+| eval Status=if(Attempts=0,"Unanswered",Status)
+| eval Status=if(IncorrectAttempts&gt;0,"Incorrect",Status)
+| eval Status=if(CorrectAttempts&gt;0,"Correct",Status)
+| fillnull value=0 BasePointsEarned BonusPointsEarned PenaltyPoints
+| fields ctf_id Number Status BasePointsAvailable BasePointsEarned BonusPointsEarned PenaltyPoints HintsAvailable HintsReceived
+| rename BasePointsAvailable as "Base Points Avail."
+         BasePointsEarned as "Base Points Earned"
+         BonusPointsEarned as "Bonus Points Earned"
+         PenaltyPoints as "Penalty Points"
+         HintsAvailable as "Hints Available"
+         HintsReceived as "Hints Received"
+| search Number="$Number$"
+          </query>
+          <earliest>0</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">50</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">none</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <html>
+        <div style="padding:10px;border:1px dotted black;">
+          <h3>Hints</h3>
+          <ul>
+            <li>If a hint says <b>Your team has not purchased this hint yet!</b>, click it to purchase it.</li>
+            <li>No results means this question has no hints.</li>
+          </ul>
+        </div>
+      </html>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <table>
+        <search>
+          <query>
+| inputlookup ctf_questions
+| search ctf_id="$ctf_id$" Number="$Number$"
+| eval Attempts=0
+| fields ctf_id Number
+| gethints
+| stats values(Hints) as Hints by ctf_id Number
+| mvexpand Hints
+| spath input=Hints
+| fields ctf_id Number HintNumber HintCost Hint
+| sort Number HintNumber
+| rename HintCost as "Hint Cost"
+| search Hint=*
+          </query>
+        </search>
+        <option name="drilldown">row</option>
+        <drilldown>
+          <link>/custom/SA-ctf_scoreboard/scoreboard_controller/purchase_hint?ctf_id=$row.ctf_id$&amp;Number=$row.Number$&amp;HintNumber=$row.HintNumber$&amp;Question=$Question$</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+</dashboard>

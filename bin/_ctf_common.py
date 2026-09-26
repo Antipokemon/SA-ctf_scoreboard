@@ -16,6 +16,7 @@ from splunk.appserver.mrsparkle.lib.util import make_splunkhome_path
 
 APP = "SA-ctf_scoreboard"
 ADMIN_APP = "SA-ctf_scoreboard_admin"
+REGISTRATION_APP = "SA-ctf_registration"
 
 
 def setup_logger(name: str, filename: str = "scoreboard_admin.log") -> logging.Logger:
@@ -59,6 +60,38 @@ def kv(collection: str, session_key: str, app: str = APP, owner: str = "nobody")
         getargs={"output_mode": "json"},
     )
     return json.loads(_decode(content))
+
+
+
+def registrations_to_team(registrations: Iterable[Dict[str, Any]], ctf_id: str) -> Dict[str, str]:
+    """Return Username -> Team/DisplayUsername for one CTF registration."""
+    result: Dict[str, str] = {}
+    wanted = str(ctf_id)
+    for row in registrations:
+        if str(row.get("ctf_id", "")) != wanted:
+            continue
+        username = str(row.get("Username", ""))
+        if not username:
+            continue
+        result[username] = str(row.get("Team") or row.get("DisplayUsername") or username)
+    return result
+
+
+def registration_for(
+    registrations: Iterable[Dict[str, Any]],
+    ctf_id: str,
+    username: str,
+) -> Dict[str, Any] | None:
+    wanted_ctf = str(ctf_id)
+    wanted_user = str(username)
+    for row in registrations:
+        if (
+            str(row.get("ctf_id", "")) == wanted_ctf
+            and str(row.get("Username", "")) == wanted_user
+            and str(row.get("status", "registered")) == "registered"
+        ):
+            return row
+    return None
 
 
 def current_username(session_key: str) -> str:

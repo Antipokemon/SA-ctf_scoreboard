@@ -28,6 +28,7 @@ from splunk.appserver.mrsparkle.lib.util import make_splunkhome_path
 
 APP = "SA-ctf_scoreboard"
 ADMIN_APP = "SA-ctf_scoreboard_admin"
+REGISTRATION_APP = "SA-ctf_registration"
 ERROR_VIEW = f"/en-US/app/{APP}/scoreboard_error"
 ADMIN_ERROR_VIEW = f"/en-US/app/{ADMIN_APP}/scoreboard_admin_error"
 
@@ -125,6 +126,40 @@ def _team_for(username: str, users: Iterable[Mapping[str, Any]]) -> str:
     return username
 
 
+
+def _ctf_rows(rows: Iterable[Mapping[str, Any]], ctf_id: str) -> List[Dict[str, Any]]:
+    wanted = str(ctf_id)
+    return [dict(row) for row in rows if str(row.get("ctf_id", "")) == wanted]
+
+
+def _registration_for(
+    username: str,
+    ctf_id: str,
+    session_key: str,
+) -> Dict[str, Any]:
+    registrations = _kv(
+        "ctf_registrations",
+        session_key,
+        app=REGISTRATION_APP,
+    )
+    for row in registrations:
+        if (
+            str(row.get("ctf_id", "")) == str(ctf_id)
+            and str(row.get("Username", "")) == str(username)
+            and str(row.get("status", "registered")) == "registered"
+        ):
+            return row
+    raise PermissionError(f"{username} is not registered for CTF {ctf_id}")
+
+
+def _team_from_registration(registration: Mapping[str, Any], username: str) -> str:
+    return str(
+        registration.get("Team")
+        or registration.get("DisplayUsername")
+        or username
+    )
+
+
 def _eula_fields(username: str, accepted: Iterable[Mapping[str, Any]]) -> Dict[str, str]:
     for row in accepted:
         if str(row.get("EulaUsername", "")) == username:
@@ -202,29 +237,44 @@ class ScoreBoardController(controllers.BaseController):
     def purchase_hint(self, **kwargs: Any) -> None:
         cherrypy.response.headers["Content-Type"] = "text/plain; charset=utf-8"
         user, caller_key = self._caller()
+        ctf_id = str(kwargs.get("ctf_id", "")).strip()
         number = kwargs.get("Number")
         hint_number = kwargs.get("HintNumber")
-        if not self.represents_int(number) or not self.represents_int(hint_number):
-            logger_admin.error("Invalid hint request Number=%r HintNumber=%r", number, hint_number)
+
+        if not ctf_id or not self.represents_int(number) or not self.represents_int(hint_number):
+            logger_admin.error(
+                "Invalid hint request ctf_id=%r Number=%r HintNumber=%r",
+                ctf_id,
+                number,
+                hint_number,
+            )
             _redirect(ERROR_VIEW)
 
         try:
-            users = _kv("ctf_users", caller_key)
-            team = _team_for(user, users)
-            questions = _kv("ctf_questions", caller_key)
+            privileged = _service_session_key()
+            registration = _registration_for(user, ctf_id, privileged)
+            team = _team_from_registration(registration, user)
+            questions = _ctf_rows(_kv("ctf_questions", caller_key), ctf_id)
             accepted = _kv("ctf_eulas_accepted", caller_key)
             eula = _eula_fields(user, accepted)
-            privileged = _service_session_key()
-            hints = _kv("ctf_hints", privileged, app=ADMIN_APP)
-            entitlements = _kv("ctf_hint_entitlements", caller_key)
+            hints = _ctf_rows(_kv("ctf_hints", privileged, app=ADMIN_APP), ctf_id)
+            entitlements = _ctf_rows(_kv("ctf_hint_entitlements", caller_key), ctf_id)
+            registrations = _kv("ctf_registrations", privileged, app=REGISTRATION_APP)
         except PermissionError:
-            logger_admin.error("User %s attempted to play without accepting the user agreement", user)
+            logger_admin.error(
+                "User %s attempted to play CTF %s without registration/EULA",
+                user,
+                ctf_id,
+            )
             _redirect(f"/en-US/app/{APP}/user_agreement_required")
         except Exception:
             logger_admin.exception("Unable to load data required to purchase a hint")
             _redirect(ERROR_VIEW)
 
-        question = next((q for q in questions if str(q.get("Number", "")) == str(number)), None)
+        question = next(
+            (q for q in questions if str(q.get("Number", "")) == str(number)),
+            None,
+        )
         hint = next(
             (
                 h
@@ -235,14 +285,28 @@ class ScoreBoardController(controllers.BaseController):
             None,
         )
         if not question or not hint:
-            logger_admin.error("Unknown question/hint combination %s/%s", number, hint_number)
+            logger_admin.error(
+                "Unknown question/hint combination ctf_id=%s %s/%s",
+                ctf_id,
+                number,
+                hint_number,
+            )
             _redirect(ERROR_VIEW)
+
+        def registered_team(username: str) -> str:
+            for row in registrations:
+                if (
+                    str(row.get("ctf_id", "")) == ctf_id
+                    and str(row.get("Username", "")) == username
+                ):
+                    return _team_from_registration(row, username)
+            return username
 
         already_purchased = False
         for entitlement in entitlements:
             entitlement_user = str(entitlement.get("user", ""))
             if (
-                _team_for(entitlement_user, users) == team
+                registered_team(entitlement_user) == team
                 and str(entitlement.get("Number", "")) == str(number)
                 and str(entitlement.get("HintNumber", "")) == str(hint_number)
             ):
@@ -253,7 +317,12 @@ class ScoreBoardController(controllers.BaseController):
             try:
                 _post_kv(
                     "ctf_hint_entitlements",
-                    {"Number": str(number), "HintNumber": str(hint_number), "user": user},
+                    {
+                        "ctf_id": ctf_id,
+                        "Number": str(number),
+                        "HintNumber": str(hint_number),
+                        "user": user,
+                    },
                     privileged,
                 )
             except Exception:
@@ -263,7 +332,9 @@ class ScoreBoardController(controllers.BaseController):
         participant: "collections.OrderedDict[str, str]" = collections.OrderedDict()
         admin: "collections.OrderedDict[str, str]" = collections.OrderedDict()
         shared = {
+            "ctf_id": ctf_id,
             "user": user,
+            "Team": team,
             "Result": "Hint",
             "Number": str(number),
             "HintNumber": str(hint_number),
@@ -280,6 +351,7 @@ class ScoreBoardController(controllers.BaseController):
         if already_purchased:
             participant["HintAlreadyPurchased"] = "1"
             admin["HintAlreadyPurchased"] = "1"
+
         _signed_fields(participant)
         _copy_signature(participant, admin)
         _log_event(participant, admin)
@@ -289,34 +361,57 @@ class ScoreBoardController(controllers.BaseController):
     def submit_question(self, **kwargs: Any) -> None:
         cherrypy.response.headers["Content-Type"] = "text/plain; charset=utf-8"
         user, caller_key = self._caller()
+        ctf_id = str(kwargs.get("ctf_id", "")).strip()
         submitted_answer = str(kwargs.get("Answer", ""))
         number = kwargs.get("Number")
-        if not self.represents_int(number):
-            logger_admin.error("Invalid question Number=%r", number)
+
+        if not ctf_id or not self.represents_int(number):
+            logger_admin.error("Invalid question ctf_id=%r Number=%r", ctf_id, number)
             _redirect(ERROR_VIEW)
 
         try:
             privileged = _service_session_key()
-            answers = _kv("ctf_answers", privileged, app=ADMIN_APP)
-            questions = _kv("ctf_questions", caller_key)
+            registration = _registration_for(user, ctf_id, privileged)
+            team = _team_from_registration(registration, user)
+            answers = _ctf_rows(_kv("ctf_answers", privileged, app=ADMIN_APP), ctf_id)
+            questions = _ctf_rows(_kv("ctf_questions", caller_key), ctf_id)
             eula = _eula_fields(user, _kv("ctf_eulas_accepted", caller_key))
         except PermissionError:
-            logger_admin.error("User %s attempted to play without accepting the user agreement", user)
+            logger_admin.error(
+                "User %s attempted to play CTF %s without registration/EULA",
+                user,
+                ctf_id,
+            )
             _redirect(f"/en-US/app/{APP}/user_agreement_required")
         except Exception:
             logger_admin.exception("Unable to load question/answer data")
             _redirect(ERROR_VIEW)
 
-        question = next((q for q in questions if str(q.get("Number", "")) == str(number)), None)
-        answer = next((a for a in answers if str(a.get("Number", "")) == str(number)), None)
+        question = next(
+            (q for q in questions if str(q.get("Number", "")) == str(number)),
+            None,
+        )
+        answer = next(
+            (a for a in answers if str(a.get("Number", "")) == str(number)),
+            None,
+        )
         if not question or not answer:
-            logger_admin.error("Question or answer not found for Number=%s", number)
+            logger_admin.error(
+                "Question or answer not found for ctf_id=%s Number=%s",
+                ctf_id,
+                number,
+            )
             _redirect(ERROR_VIEW)
 
         participant: "collections.OrderedDict[str, str]" = collections.OrderedDict()
         admin: "collections.OrderedDict[str, str]" = collections.OrderedDict()
+        participant["ctf_id"] = admin["ctf_id"] = ctf_id
         participant["user"] = admin["user"] = user
+        participant["Team"] = admin["Team"] = team
+
         for key, value in kwargs.items():
+            if key == "ctf_id":
+                continue
             value_text = str(value)
             if key in ("Answer", "Question"):
                 admin[key] = f'"{value_text.replace(chr(34), chr(39))}"'
@@ -328,13 +423,18 @@ class ScoreBoardController(controllers.BaseController):
         participant["Number"] = admin["Number"] = str(number)
         official_question = str(question.get("Question", "")).replace('"', "'")
         participant["QuestionOfficial"] = admin["QuestionOfficial"] = f'"{official_question}"'
-        participant["BasePointsAvailable"] = admin["BasePointsAvailable"] = str(question.get("BasePoints", "0"))
+        participant["BasePointsAvailable"] = admin["BasePointsAvailable"] = str(
+            question.get("BasePoints", "0")
+        )
         participant["StartTime"] = admin["StartTime"] = str(question.get("StartTime", "0"))
         participant["EndTime"] = admin["EndTime"] = str(question.get("EndTime", "0"))
         admin["AnswerOfficial"] = f'"{str(answer.get("Answer", "")).replace(chr(34), chr(39))}"'
 
         now = int(time.time())
-        correct = submitted_answer.lower().strip() == str(answer.get("Answer", "")).lower().strip()
+        correct = submitted_answer.lower().strip() == str(
+            answer.get("Answer", "")
+        ).lower().strip()
+
         if correct:
             participant["Result"] = admin["Result"] = "Correct"
             participant["Penalty"] = admin["Penalty"] = "0"
@@ -348,12 +448,20 @@ class ScoreBoardController(controllers.BaseController):
                 additional = str(question.get("AdditionalBonusPoints") or "0")
                 if additional != "0":
                     participant["SolicitBonusInfo"] = admin["SolicitBonusInfo"] = "1"
-                    instructions = str(question.get("AdditionalBonusInstructions", "")).replace('"', "'")
-                    participant["SolicitBonusInstructions"] = admin["SolicitBonusInstructions"] = f'"{instructions}"'
+                    instructions = str(
+                        question.get("AdditionalBonusInstructions", "")
+                    ).replace('"', "'")
+                    participant["SolicitBonusInstructions"] = admin[
+                        "SolicitBonusInstructions"
+                    ] = f'"{instructions}"'
             else:
                 participant["BasePointsAwarded"] = admin["BasePointsAwarded"] = "0"
                 participant["SpeedBonusAwarded"] = admin["SpeedBonusAwarded"] = "0"
-                logger_admin.warning("Question %s submitted outside scoring window", number)
+                logger_admin.warning(
+                    "Question ctf_id=%s Number=%s submitted outside scoring window",
+                    ctf_id,
+                    number,
+                )
         else:
             participant["Result"] = admin["Result"] = "Incorrect"
             participant["BasePointsAwarded"] = admin["BasePointsAwarded"] = "0"
@@ -363,6 +471,7 @@ class ScoreBoardController(controllers.BaseController):
         participant["AdditionalBonusAwarded"] = admin["AdditionalBonusAwarded"] = "0"
         for key, value in eula.items():
             participant[key] = admin[key] = value
+
         _signed_fields(participant)
         _copy_signature(participant, admin)
         _log_event(participant, admin)
@@ -372,13 +481,29 @@ class ScoreBoardController(controllers.BaseController):
     def submit_bonus_info(self, **kwargs: Any) -> None:
         cherrypy.response.headers["Content-Type"] = "text/plain; charset=utf-8"
         user, caller_key = self._caller()
+        ctf_id = str(kwargs.get("ctf_id", "")).strip()
         number = kwargs.get("Number")
         bonus_info = str(kwargs.get("BonusInfo", ""))
-        if not self.represents_int(number) or not (1 <= int(number) <= 1024) or not (1 <= len(bonus_info) <= 2048):
-            logger_admin.error("Invalid bonus submission Number=%r length=%d", number, len(bonus_info))
+
+        if (
+            not ctf_id
+            or not self.represents_int(number)
+            or not (1 <= int(number) <= 1024)
+            or not (1 <= len(bonus_info) <= 2048)
+        ):
+            logger_admin.error(
+                "Invalid bonus submission ctf_id=%r Number=%r length=%d",
+                ctf_id,
+                number,
+                len(bonus_info),
+            )
             _redirect(ERROR_VIEW)
+
         try:
-            questions = _kv("ctf_questions", caller_key)
+            privileged = _service_session_key()
+            registration = _registration_for(user, ctf_id, privileged)
+            team = _team_from_registration(registration, user)
+            questions = _ctf_rows(_kv("ctf_questions", caller_key), ctf_id)
             eula = _eula_fields(user, _kv("ctf_eulas_accepted", caller_key))
         except PermissionError:
             _redirect(f"/en-US/app/{APP}/user_agreement_required")
@@ -386,31 +511,67 @@ class ScoreBoardController(controllers.BaseController):
             logger_admin.exception("Unable to load data for bonus submission")
             _redirect(ERROR_VIEW)
 
-        question = next((q for q in questions if str(q.get("Number", "")) == str(number)), None)
+        question = next(
+            (q for q in questions if str(q.get("Number", "")) == str(number)),
+            None,
+        )
         if not question:
             _redirect(ERROR_VIEW)
 
-        participant: Dict[str, str] = {"user": user}
-        admin: Dict[str, str] = {"user": user}
+        participant: Dict[str, str] = {
+            "ctf_id": ctf_id,
+            "user": user,
+            "Team": team,
+        }
+        admin: Dict[str, str] = {
+            "ctf_id": ctf_id,
+            "user": user,
+            "Team": team,
+        }
+
         for key, value in kwargs.items():
-            text = str(value)
-            admin[key] = f'"{text.replace(chr(34), chr(39))}"' if key in ("Answer", "Question") else text
+            if key == "ctf_id":
+                continue
+            value_text = str(value)
+            admin[key] = (
+                f'"{value_text.replace(chr(34), chr(39))}"'
+                if key in ("Answer", "Question")
+                else value_text
+            )
             if key not in ("Answer", "BonusInfo"):
-                participant[key] = text
+                participant[key] = value_text
+
         participant["Number"] = admin["Number"] = str(number)
-        participant["QuestionOfficial"] = admin["QuestionOfficial"] = f'"{str(question.get("Question", "")).replace(chr(34), chr(39))}"'
-        participant["BasePointsAvailable"] = admin["BasePointsAvailable"] = str(question.get("BasePoints", "0"))
+        participant["QuestionOfficial"] = admin["QuestionOfficial"] = (
+            f'"{str(question.get("Question", "")).replace(chr(34), chr(39))}"'
+        )
+        participant["BasePointsAvailable"] = admin["BasePointsAvailable"] = str(
+            question.get("BasePoints", "0")
+        )
         participant["StartTime"] = admin["StartTime"] = str(question.get("StartTime", "0"))
         participant["EndTime"] = admin["EndTime"] = str(question.get("EndTime", "0"))
         participant["Result"] = admin["Result"] = "Bonus"
+
         now = int(time.time())
-        in_window = int(question.get("StartTime", 0)) <= now <= int(question.get("EndTime", 0))
-        participant["AdditionalBonusAwarded"] = admin["AdditionalBonusAwarded"] = str(question.get("AdditionalBonusPoints") or "0") if in_window else "0"
+        in_window = (
+            int(question.get("StartTime", 0))
+            <= now
+            <= int(question.get("EndTime", 0))
+        )
+        participant["AdditionalBonusAwarded"] = admin[
+            "AdditionalBonusAwarded"
+        ] = (
+            str(question.get("AdditionalBonusPoints") or "0")
+            if in_window
+            else "0"
+        )
         participant["BasePointsAwarded"] = admin["BasePointsAwarded"] = "0"
         participant["SpeedBonusAwarded"] = admin["SpeedBonusAwarded"] = "0"
         participant["Penalty"] = admin["Penalty"] = "0"
+
         for key, value in eula.items():
             participant[key] = admin[key] = value
+
         _signed_fields(participant)
         _copy_signature(participant, admin)
         _log_event(participant, admin)
@@ -432,30 +593,60 @@ class ScoreBoardController(controllers.BaseController):
         except Exception:
             logger_admin.exception("Unable to verify admin role for %s", user)
             _redirect(ADMIN_ERROR_VIEW)
+
         if "ctf_admin" not in roles or kwargs.get("Adjust") != "True":
             logger_admin.error("Unauthorized score adjustment attempt by %s", user)
             _redirect(ADMIN_ERROR_VIEW)
 
+        ctf_id = str(kwargs.get("ctf_id", "")).strip()
         teams = str(kwargs.get("Teams", "")).split()
         base = str(kwargs.get("Base") or "0")
         bonus = str(kwargs.get("Bonus") or "0")
         penalty = str(kwargs.get("Penalty") or "0")
         note = str(kwargs.get("Note") or "")
         number = str(kwargs.get("Number") or "")
-        if not teams or not note or not self.represents_int(number) or not all(self.represents_int(v) for v in (base, bonus, penalty)):
+
+        if (
+            not ctf_id
+            or not teams
+            or not note
+            or not self.represents_int(number)
+            or not all(self.represents_int(v) for v in (base, bonus, penalty))
+        ):
             _redirect(ADMIN_ERROR_VIEW)
+
         try:
-            questions = _kv("ctf_questions", session_key)
+            privileged = _service_session_key()
+            questions = _ctf_rows(_kv("ctf_questions", session_key), ctf_id)
+            registrations = _kv(
+                "ctf_registrations",
+                privileged,
+                app=REGISTRATION_APP,
+            )
         except Exception:
-            logger_admin.exception("Unable to read questions for adjustment")
+            logger_admin.exception("Unable to read questions/registrations for adjustment")
             _redirect(ADMIN_ERROR_VIEW)
-        question = next((q for q in questions if str(q.get("Number", "")) == number), None)
+
+        question = next(
+            (q for q in questions if str(q.get("Number", "")) == number),
+            None,
+        )
         if not question:
             _redirect(ADMIN_ERROR_VIEW)
+
+        def team_for_user(username: str) -> str:
+            for row in registrations:
+                if (
+                    str(row.get("ctf_id", "")) == ctf_id
+                    and str(row.get("Username", "")) == username
+                ):
+                    return _team_from_registration(row, username)
+            return username
 
         last_redirect: Dict[str, str] = {}
         for team_user in teams:
             participant: Dict[str, str] = {
+                "ctf_id": ctf_id,
                 "admin_user": user,
                 "Adjustment": "True",
                 "Note": f'"{note.replace(chr(34), chr(39))}"',
@@ -464,6 +655,7 @@ class ScoreBoardController(controllers.BaseController):
                 "StartTime": str(question.get("StartTime", "0")),
                 "EndTime": str(question.get("EndTime", "0")),
                 "user": team_user,
+                "Team": team_for_user(team_user),
                 "Number": number,
                 "BasePointsAwarded": base,
                 "SpeedBonusAwarded": bonus,
@@ -476,4 +668,5 @@ class ScoreBoardController(controllers.BaseController):
             _copy_signature(participant, admin)
             _log_event(participant, admin)
             last_redirect = participant
+
         _redirect(f"/en-US/app/{ADMIN_APP}/adjust_score_result", last_redirect)

@@ -1,0 +1,107 @@
+<dashboard version="1.1" script="ctf_event_context.js,table_icons_inline.js,custom_table_row_expansion.js,instantiate_countdown.js" stylesheet="table_decorations.css,questions.css" hideEdit="true" theme="dark">
+  <label>Questions</label>
+
+  <row>
+    <panel>
+      <html>
+        <div id="ctf-context-error" style="display:none;padding:12px;border:1px solid #d9534f;margin-bottom:12px;"></div>
+        <div id="logodiv">
+          <img id="ctflogo" src="/static/app/SA-ctf_scoreboard/ctflogo.png"/>
+        </div>
+      </html>
+    </panel>
+
+    <panel>
+      <html>
+        <h3 class="section-heading">CTF Information</h3>
+        <table border="0">
+          <tr>
+            <td style="font-size:12px;padding:5px;">Event</td>
+            <td style="font-size:18px;font-weight:bold;padding:5px;">$ctf_event_name$</td>
+          </tr>
+          <tr>
+            <td style="font-size:12px;padding:5px;">User</td>
+            <td style="font-size:18px;font-weight:bold;padding:5px;">$ctf_DisplayUsername$ ($ctf_user$)</td>
+          </tr>
+          <tr>
+            <td style="font-size:12px;padding:5px;">Team</td>
+            <td style="font-size:18px;font-weight:bold;padding:5px;">$ctf_Team$</td>
+          </tr>
+        </table>
+      </html>
+    </panel>
+
+    <panel>
+      <html>
+        <h3 class="section-heading"><center>Time Remaining</center></h3>
+        <div id="clock"></div>
+        <div id="clock-text">(Days:Hours:Minutes:Seconds)</div>
+      </html>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <html>
+        <div style="padding:5px;border:1px dotted black;">
+          <h4><b>Click "&gt;" in the first column of any row below to see your team's submission history for that question.</b></h4>
+        </div>
+      </html>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <table id="table1">
+        <search>
+          <query>
+index=scoreboard ctf_id="$ctf_id$" Team="$ctf_Team$" (Result="Incorrect" OR Result="Correct" OR Result="Bonus")
+| stats count as Attempts
+        max(BasePointsAwarded) as BasePointsEarned
+        max(SpeedBonusAwarded) as BonusPointsEarned
+        sum(Penalty) as PenaltyPoints
+        max(AdditionalBonusAwarded) as AdditionalBonus
+        count(eval(Result=="Incorrect")) as IncorrectAttempts
+        count(eval(Result=="Correct")) as CorrectAttempts
+        by ctf_id Number
+| append
+    [ | inputlookup ctf_questions
+      | search ctf_id="$ctf_id$"
+      | eval Attempts=0, IncorrectAttempts=0, CorrectAttempts=0
+      | fields ctf_id Number Question BasePoints Attempts CorrectAttempts IncorrectAttempts ]
+| stats last(Question) as Question
+        last(BasePoints) as BasePointsAvailable
+        last(BasePointsEarned) as BasePointsEarned
+        last(BonusPointsEarned) as BonusPointsEarned
+        max(AdditionalBonus) as AdditionalBonus
+        sum(PenaltyPoints) as PenaltyPoints
+        sum(Attempts) as Attempts
+        sum(IncorrectAttempts) as IncorrectAttempts
+        sum(CorrectAttempts) as CorrectAttempts
+        by ctf_id Number
+| eval Status=if(Attempts=0,"Unanswered",Status)
+| eval Status=if(IncorrectAttempts&gt;0,"Incorrect",Status)
+| eval Status=if(CorrectAttempts&gt;0,"Correct",Status)
+| fillnull value=0 BasePointsEarned BonusPointsEarned PenaltyPoints AdditionalBonus
+| fields ctf_id Number Question Status BasePointsAvailable BasePointsEarned BonusPointsEarned AdditionalBonus PenaltyPoints
+| rename BasePointsAvailable as "Base Points Avail."
+         BasePointsEarned as "Base Points Earned"
+         BonusPointsEarned as "Speed Bonus Earned"
+         PenaltyPoints as "Penalty"
+         AdditionalBonus as "Additional Bonus"
+| sort Number
+          </query>
+          <earliest>0</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">100</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="wrap">true</option>
+        <drilldown>
+          <link>question?ctf_id=$row.ctf_id$&amp;Number=$row.Number$&amp;Question=$row.Question$</link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+</dashboard>
