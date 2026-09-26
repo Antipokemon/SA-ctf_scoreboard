@@ -1,0 +1,5 @@
+[ScoreboardController]
+USER = svcaccount
+PASS = CHANGE_ME
+# Use a long random value. Example: openssl rand -hex 32
+VKEY = CHANGE_ME_TO_A_LONG_RANDOM_SECRET

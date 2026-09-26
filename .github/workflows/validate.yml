@@ -1,0 +1,28 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Test
+        run: make test
+      - name: Build complete app
+        if: matrix.python-version == '3.13'
+        run: make package
+      - uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.13'
+        with:
+          name: SA-ctf_scoreboard-10.4.1
+          path: dist/SA-ctf_scoreboard-10.4.1.tar.gz
