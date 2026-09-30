@@ -16,9 +16,25 @@ require([
         }
     }
 
+    function normalizeEventImageUrl(imageUrl) {
+        var requested = String(imageUrl || "").trim();
+        if (!requested) {
+            return "";
+        }
+
+        // Splunk serves app static assets from /static/app/<app>/..., not /static/apps/....
+        // Normalize the plural form because older CTF event records may already contain it.
+        requested = requested.replace(/^\/static\/apps\//, "/static/app/");
+        requested = requested.replace(/^static\/apps\//, "/static/app/");
+        if (/^static\/app\//.test(requested)) {
+            requested = "/" + requested;
+        }
+        return requested;
+    }
+
     function setEventImage(imageUrl) {
         var fallback = "/static/app/SA-ctf_scoreboard/ctflogo.png";
-        var requested = String(imageUrl || "").trim();
+        var requested = normalizeEventImageUrl(imageUrl);
         var $logo = $("#ctflogo");
 
         if (!$logo.length) {

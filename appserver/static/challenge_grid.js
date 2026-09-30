@@ -71,7 +71,8 @@ require([
             BasePoints: numberValue(raw.BasePoints),
             Attempts: numberValue(raw.Attempts),
             IncorrectAttempts: numberValue(raw.IncorrectAttempts),
-            CorrectAttempts: numberValue(raw.CorrectAttempts)
+            CorrectAttempts: numberValue(raw.CorrectAttempts),
+            QuestionScore: numberValue(raw.QuestionScore)
         };
     }
 
@@ -151,10 +152,12 @@ require([
         var total = challengeRows.length;
         var completed = challengeRows.filter(function(row) { return row.Status === "Correct"; }).length;
         var remaining = Math.max(total - completed, 0);
-        var percent = total ? Math.round((completed / total) * 100) : 0;
+        var teamScore = challengeRows.reduce(function(totalScore, row) {
+            return totalScore + numberValue(row.QuestionScore);
+        }, 0);
         $("#ctf_progress_completed_value").text(completed);
         $("#ctf_progress_remaining_value").text(remaining);
-        $("#ctf_progress_percent_value").text(percent + "%");
+        $("#ctf_team_score_value").text(teamScore.toLocaleString());
     }
 
     function matchesFilter(row) {

@@ -17,19 +17,25 @@
     [ search index=scoreboard
              ctf_id="$ctf_id$"
              Team="$ctf_Team$"
-             (Result="Incorrect" OR Result="Correct" OR Result="Bonus")
+             (Result="Incorrect" OR Result="Correct" OR Result="Bonus" OR Result="Hint")
       | stats count(eval(Result=="Incorrect" OR Result=="Correct")) as Attempts
               count(eval(Result=="Incorrect")) as IncorrectAttempts
               count(eval(Result=="Correct")) as CorrectAttempts
+              max(BasePointsAwarded) as BasePointsAwarded
+              max(SpeedBonusAwarded) as SpeedBonusAwarded
+              max(AdditionalBonusAwarded) as AdditionalBonusAwarded
+              sum(Penalty) as Penalty
         by Number
+      | fillnull value=0 BasePointsAwarded SpeedBonusAwarded AdditionalBonusAwarded Penalty
+      | eval QuestionScore=BasePointsAwarded+SpeedBonusAwarded+AdditionalBonusAwarded-Penalty
     ]
-| fillnull value=0 Attempts IncorrectAttempts CorrectAttempts BasePoints
+| fillnull value=0 Attempts IncorrectAttempts CorrectAttempts BasePoints QuestionScore
 | eval Status=case(
         CorrectAttempts&gt;0,"Correct",
         IncorrectAttempts&gt;0,"Incorrect",
         true(),"Unanswered"
   )
-| fields Number ChallengeID Category Question Status BasePoints Attempts IncorrectAttempts CorrectAttempts
+| fields Number ChallengeID Category Question Status BasePoints Attempts IncorrectAttempts CorrectAttempts QuestionScore
 | sort 0 + Number
     </query>
     <earliest>0</earliest>
@@ -87,9 +93,9 @@
             <small>questions open</small>
           </div>
           <div class="ctf-progress-card">
-            <span>Progress</span>
-            <strong id="ctf_progress_percent_value">0%</strong>
-            <small>team completion</small>
+            <span>Team Score</span>
+            <strong id="ctf_team_score_value">0</strong>
+            <small>points earned</small>
           </div>
         </div>
       </html>

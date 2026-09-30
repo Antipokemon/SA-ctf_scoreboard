@@ -109,10 +109,23 @@ class RepoCompatibilityTests(unittest.TestCase):
 
     def test_event_image_is_bound_from_registration_context(self):
         js = (ROOT / "appserver/static/ctf_event_context.js").read_text()
+        self.assertIn('function normalizeEventImageUrl', js)
+        self.assertIn(r'/static\/apps\//, "/static/app/"', js)
         self.assertIn('function setEventImage', js)
         self.assertIn('selected.image_url', js)
         self.assertIn('/static/app/SA-ctf_scoreboard/ctflogo.png', js)
         self.assertIn('$("#ctflogo")', js)
+
+    def test_challenge_summary_uses_live_team_score(self):
+        questions = (ROOT / "default/data/ui/views/questions.xml").read_text()
+        js = (ROOT / "appserver/static/challenge_grid.js").read_text()
+        self.assertIn('id="ctf_team_score_value"', questions)
+        self.assertIn('Team Score', questions)
+        self.assertNotIn('id="ctf_progress_percent_value"', questions)
+        self.assertIn('QuestionScore=BasePointsAwarded+SpeedBonusAwarded+AdditionalBonusAwarded-Penalty', questions)
+        self.assertIn('Result="Hint"', questions)
+        self.assertIn('QuestionScore: numberValue(raw.QuestionScore)', js)
+        self.assertIn('$("#ctf_team_score_value")', js)
 
     def test_modal_hints_use_json_controller_endpoint(self):
         js = (ROOT / "appserver/static/challenge_grid.js").read_text()
