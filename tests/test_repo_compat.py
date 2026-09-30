@@ -56,6 +56,72 @@ class RepoCompatibilityTests(unittest.TestCase):
             self.assertIn(f"[{name}]", collections)
             self.assertIn(f"[{name}]", transforms)
 
+
+    def test_question_views_use_card_modal_layout(self):
+        questions = (ROOT / "default/data/ui/views/questions.xml").read_text()
+        question = (ROOT / "default/data/ui/views/question.xml").read_text()
+        self.assertNotIn("custom_table_row_expansion.js", questions)
+        self.assertNotIn("custom_table_row_expansion.js", question)
+        self.assertIn('challenge_grid.js', questions)
+        self.assertIn('id="challengeData"', questions)
+        self.assertIn('<refresh>5s</refresh>', questions)
+        self.assertIn('id="ctf_challenge_sections"', questions)
+        self.assertIn('id="ctf_challenge_modal"', questions)
+        self.assertNotIn('<table id="table1">', questions)
+        self.assertIn('stylesheet="questions.css,table_decorations.css"', questions)
+        self.assertIn('stylesheet="questions.css,table_decorations.css"', question)
+
+    def test_user_info_macros_do_not_require_retired_ctf_users_lookup(self):
+        macros = (ROOT / "default/macros.conf").read_text()
+        self.assertNotIn("lookup ctf_users", macros)
+        self.assertIn("coalesce(DisplayUsername, Username, user)", macros)
+
+    def test_questions_stylesheet_is_tracked_by_overlay(self):
+        css = ROOT / "appserver/static/questions.css"
+        self.assertTrue(css.exists())
+        text = css.read_text()
+        self.assertIn(".ctf-challenge-grid", text)
+        self.assertIn(".ctf-challenge-card.is-solved", text)
+        self.assertIn(".ctf-modal", text)
+        self.assertIn("#ctf_progress_row", text)
+
+    def test_challenge_grid_supports_live_team_updates_and_inline_actions(self):
+        js_path = ROOT / "appserver/static/challenge_grid.js"
+        self.assertTrue(js_path.exists())
+        js = js_path.read_text()
+        self.assertIn('mvc.Components.get("challengeData")', js)
+        self.assertIn('A teammate solved', js)
+        self.assertIn('scoreboard_controller/submit_question', js)
+        self.assertIn('scoreboard_controller/purchase_hint', js)
+        self.assertIn('ajax: "1"', js)
+
+    def test_controller_supports_ajax_question_and_hint_actions(self):
+        text = (ROOT / "appserver/controllers/scoreboard_controller.py").read_text()
+        self.assertIn("def _wants_json", text)
+        self.assertIn("def _json_response", text)
+        self.assertGreaterEqual(text.count("if wants_json:"), 2)
+        self.assertIn('"result": str(participant.get("Result", ""))', text)
+        self.assertIn('"hint": str(hint.get("Hint", ""))', text)
+
+    def test_simplexml_ids_are_valid_identifiers(self):
+        import re
+        import xml.etree.ElementTree as ET
+
+        for rel in (
+            "default/data/ui/views/questions.xml",
+            "default/data/ui/views/question.xml",
+        ):
+            root = ET.parse(ROOT / rel).getroot()
+            for elem in root.iter():
+                if elem.tag in {"row", "panel", "table", "search", "chart", "single", "event", "map", "input"}:
+                    identifier = elem.attrib.get("id")
+                    if identifier is not None:
+                        self.assertRegex(
+                            identifier,
+                            r"^[A-Za-z_][A-Za-z0-9_]*$",
+                            msg=f"Invalid Simple XML id {identifier!r} in {rel}",
+                        )
+
     def test_xml_patcher_adds_version_1_1(self):
         spec = importlib.util.spec_from_file_location("builder", ROOT / "tools" / "build_from_upstream.py")
         builder = importlib.util.module_from_spec(spec)

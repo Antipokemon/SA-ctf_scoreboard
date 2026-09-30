@@ -1,179 +1,156 @@
 <dashboard version="1.1"
-           script="ctf_event_context.js,table_icons_inline.js,custom_table_row_expansion.js,instantiate_countdown.js"
-           stylesheet="table_decorations.css,questions.css"
+           script="ctf_event_context.js,instantiate_countdown.js,challenge_grid.js"
+           stylesheet="questions.css,table_decorations.css"
            hideEdit="true"
            theme="dark">
 
-  <label>Questions</label>
+  <label>Challenges</label>
 
-  <row>
-    <panel>
-      <html>
-        <div id="ctf-context-error"
-             style="display:none;padding:12px;border:1px solid #d9534f;margin-bottom:12px;">
-        </div>
-
-        <div id="logodiv">
-          <img id="ctflogo"
-               src="/static/app/SA-ctf_scoreboard/ctflogo.png"/>
-        </div>
-      </html>
-    </panel>
-
-    <panel>
-      <html>
-        <h3 class="section-heading">CTF Information</h3>
-
-        <table border="0">
-          <tr>
-            <td style="font-size:12px;padding:5px;">
-              Event
-            </td>
-
-            <td style="font-size:18px;font-weight:bold;padding:5px;">
-              $ctf_event_name$
-            </td>
-          </tr>
-
-          <tr>
-            <td style="font-size:12px;padding:5px;">
-              User
-            </td>
-
-            <td style="font-size:18px;font-weight:bold;padding:5px;">
-              $ctf_DisplayUsername$ ($ctf_user$)
-            </td>
-          </tr>
-
-          <tr>
-            <td style="font-size:12px;padding:5px;">
-              Team
-            </td>
-
-            <td style="font-size:18px;font-weight:bold;padding:5px;">
-              $ctf_Team$
-            </td>
-          </tr>
-        </table>
-      </html>
-    </panel>
-
-    <panel>
-      <html>
-        <h3 class="section-heading">
-          <center>Time Remaining</center>
-        </h3>
-
-        <div id="clock"></div>
-
-        <div id="clock-text">
-          (Days:Hours:Minutes:Seconds)
-        </div>
-      </html>
-    </panel>
-  </row>
-
-  <row>
-    <panel>
-      <html>
-        <div style="padding:5px;border:1px dotted black;">
-          <h4>
-            <b>
-              Click "&gt;" in the first column of any row below to see your team's
-              submission history for that question.
-            </b>
-          </h4>
-        </div>
-      </html>
-    </panel>
-  </row>
-
-  <row>
-    <panel depends="$ctf_id$">
-
-      <table id="table1">
-
-        <search>
-          <query>
+  <search id="challengeData">
+    <query>
 | inputlookup ctf_questions
 | search ctf_id="$ctf_id$"
-| fields ctf_id Number Question BasePoints
-| eval Attempts=0,
-       IncorrectAttempts=0,
-       CorrectAttempts=0,
-       BasePointsEarned=0,
-       BonusPointsEarned=0,
-       AdditionalBonus=0,
-       PenaltyPoints=0
-| append
+| eval Category=coalesce(Category,"Challenges")
+| eval ChallengeID=coalesce(ChallengeID,printf("Q%03d",Number))
+| fields Number Question BasePoints Category ChallengeID
+| join type=left Number
     [ search index=scoreboard
              ctf_id="$ctf_id$"
              Team="$ctf_Team$"
              (Result="Incorrect" OR Result="Correct" OR Result="Bonus")
-      | stats count as Attempts
-              max(BasePointsAwarded) as BasePointsEarned
-              max(SpeedBonusAwarded) as BonusPointsEarned
-              sum(Penalty) as PenaltyPoints
-              max(AdditionalBonusAwarded) as AdditionalBonus
+      | stats count(eval(Result=="Incorrect" OR Result=="Correct")) as Attempts
               count(eval(Result=="Incorrect")) as IncorrectAttempts
               count(eval(Result=="Correct")) as CorrectAttempts
-        by ctf_id Number
+        by Number
     ]
-| stats last(Question) as Question
-        max(BasePoints) as BasePointsAvailable
-        max(BasePointsEarned) as BasePointsEarned
-        max(BonusPointsEarned) as BonusPointsEarned
-        max(AdditionalBonus) as AdditionalBonus
-        sum(PenaltyPoints) as PenaltyPoints
-        sum(Attempts) as Attempts
-        sum(IncorrectAttempts) as IncorrectAttempts
-        sum(CorrectAttempts) as CorrectAttempts
-        by ctf_id Number
+| fillnull value=0 Attempts IncorrectAttempts CorrectAttempts BasePoints
 | eval Status=case(
-        CorrectAttempts&gt;0, "Correct",
-        IncorrectAttempts&gt;0, "Incorrect",
-        true(), "Unanswered"
+        CorrectAttempts&gt;0,"Correct",
+        IncorrectAttempts&gt;0,"Incorrect",
+        true(),"Unanswered"
   )
-| fillnull value=0
-    BasePointsEarned
-    BonusPointsEarned
-    PenaltyPoints
-    AdditionalBonus
-| fields
-    ctf_id
-    Number
-    Question
-    Status
-    BasePointsAvailable
-    BasePointsEarned
-    BonusPointsEarned
-    AdditionalBonus
-    PenaltyPoints
-| rename
-    BasePointsAvailable as "Base Points Avail."
-    BasePointsEarned as "Base Points Earned"
-    BonusPointsEarned as "Speed Bonus Earned"
-    PenaltyPoints as "Penalty"
-    AdditionalBonus as "Additional Bonus"
+| fields Number ChallengeID Category Question Status BasePoints Attempts IncorrectAttempts CorrectAttempts
 | sort 0 + Number
-          </query>
+    </query>
+    <earliest>0</earliest>
+    <latest>now</latest>
+    <refresh>5s</refresh>
+    <refreshType>delay</refreshType>
+  </search>
 
-          <earliest>0</earliest>
-          <latest>now</latest>
-        </search>
+  <row id="ctf_overview_row">
+    <panel id="ctf_logo_panel">
+      <html>
+        <div id="ctf-context-error" class="ctf-error" style="display:none;"></div>
+        <div class="ctf-logo-wrap">
+          <img id="ctflogo" src="/static/app/SA-ctf_scoreboard/ctflogo.png"/>
+        </div>
+      </html>
+    </panel>
 
-        <option name="count">100</option>
-        <option name="dataOverlayMode">none</option>
-        <option name="drilldown">row</option>
-        <option name="wrap">true</option>
+    <panel id="ctf_info_panel">
+      <html>
+        <div class="ctf-info-card">
+          <div class="ctf-kicker">CTF EVENT</div>
+          <div class="ctf-event-name">$ctf_event_name$</div>
+          <div class="ctf-meta-grid">
+            <div><span>User</span><strong>$ctf_DisplayUsername$</strong></div>
+            <div><span>Team</span><strong>$ctf_Team$</strong></div>
+          </div>
+        </div>
+      </html>
+    </panel>
 
-        <drilldown>
-          <link>
-            question?ctf_id=$row.ctf_id$&amp;Number=$row.Number$&amp;Question=$row.Question$
-          </link>
-        </drilldown>
+    <panel id="ctf_time_panel">
+      <html>
+        <div class="ctf-time-card">
+          <div class="ctf-kicker">TIME REMAINING</div>
+          <div id="clock"></div>
+          <div id="clock-text">Days : Hours : Minutes : Seconds</div>
+        </div>
+      </html>
+    </panel>
+  </row>
 
-      </table>
+  <row id="ctf_progress_row">
+    <panel>
+      <html>
+        <div class="ctf-progress-grid">
+          <div class="ctf-progress-card">
+            <span>Completed</span>
+            <strong id="ctf_progress_completed_value">0</strong>
+            <small>questions solved</small>
+          </div>
+          <div class="ctf-progress-card">
+            <span>Remaining</span>
+            <strong id="ctf_progress_remaining_value">0</strong>
+            <small>questions open</small>
+          </div>
+          <div class="ctf-progress-card">
+            <span>Progress</span>
+            <strong id="ctf_progress_percent_value">0%</strong>
+            <small>team completion</small>
+          </div>
+        </div>
+      </html>
+    </panel>
+  </row>
+
+  <row id="ctf_challenges_row">
+    <panel>
+      <html>
+        <div class="ctf-challenge-toolbar">
+          <div class="ctf-filter-group" role="group" aria-label="Challenge status filter">
+            <button type="button" class="ctf-filter is-active" data-filter="all">All</button>
+            <button type="button" class="ctf-filter" data-filter="open">Open</button>
+            <button type="button" class="ctf-filter" data-filter="solved">Solved</button>
+            <button type="button" class="ctf-filter" data-filter="incorrect">Attempted</button>
+          </div>
+          <input id="ctf_challenge_search" class="ctf-challenge-search" type="search" placeholder="Search challenges" aria-label="Search challenges"/>
+          <div id="ctf_live_status" class="ctf-live-status">Team status refreshes every 5 seconds</div>
+        </div>
+
+        <div id="ctf_challenge_sections" class="ctf-challenge-sections"></div>
+        <div id="ctf_challenge_empty" class="ctf-challenge-empty" style="display:none;">No challenges match this filter.</div>
+
+        <div id="ctf_team_toast" class="ctf-team-toast" role="status" aria-live="polite"></div>
+
+        <div id="ctf_challenge_modal" class="ctf-modal" aria-hidden="true">
+          <div class="ctf-modal-backdrop" data-modal-close="1"></div>
+          <div class="ctf-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="ctf_modal_title">
+            <button type="button" class="ctf-modal-close" data-modal-close="1" aria-label="Close challenge">&#215;</button>
+
+            <div class="ctf-modal-topline">
+              <span id="ctf_modal_challenge_id" class="ctf-challenge-id"></span>
+              <span id="ctf_modal_status" class="ctf-status-badge"></span>
+            </div>
+
+            <h2 id="ctf_modal_title" class="ctf-modal-title"></h2>
+
+            <div class="ctf-modal-stats">
+              <div><span>Points</span><strong id="ctf_modal_points">0</strong></div>
+              <div><span>Team attempts</span><strong id="ctf_modal_attempts">0</strong></div>
+            </div>
+
+            <div id="ctf_modal_message" class="ctf-modal-message" style="display:none;"></div>
+
+            <form id="ctf_answer_form" class="ctf-modal-answer-form">
+              <label for="ctf_answer_input">Answer</label>
+              <div class="ctf-modal-answer-row">
+                <input id="ctf_answer_input" name="Answer" type="text" autocomplete="off" placeholder="Enter answer"/>
+                <button id="ctf_answer_submit" type="submit" class="btn btn-primary">Submit</button>
+              </div>
+              <div class="ctf-answer-help">Answers are case-insensitive; leading and trailing whitespace is ignored.</div>
+            </form>
+
+            <section class="ctf-modal-hints">
+              <h3>Hints</h3>
+              <div id="ctf_modal_hints_loading" class="ctf-hint-loading">Loading hints…</div>
+              <div id="ctf_modal_hints" class="ctf-hint-list"></div>
+            </section>
+          </div>
+        </div>
+      </html>
     </panel>
   </row>
 

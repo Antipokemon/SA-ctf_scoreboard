@@ -193,6 +193,16 @@ def _redirect(path: str, params: Optional[Mapping[str, Any]] = None) -> None:
     raise cherrypy.HTTPRedirect(path, 302)
 
 
+def _wants_json(kwargs: Mapping[str, Any]) -> bool:
+    return str(kwargs.get("ajax", "")).strip().lower() in {"1", "true", "yes", "json"}
+
+
+def _json_response(payload: Mapping[str, Any], status: int = 200) -> str:
+    cherrypy.response.status = status
+    cherrypy.response.headers["Content-Type"] = "application/json; charset=utf-8"
+    return json.dumps(dict(payload), ensure_ascii=False)
+
+
 def _signed_fields(data: MutableMapping[str, Any]) -> None:
     data["tcode"] = validatectf.makeTCode(int(time.time()))
     data["vcode"] = validatectf.makeVCode(
@@ -234,12 +244,13 @@ class ScoreBoardController(controllers.BaseController):
         return cherrypy.session["user"]["name"], cherrypy.session.get("sessionKey")
 
     @expose_page(must_login=True, methods=["GET"])
-    def purchase_hint(self, **kwargs: Any) -> None:
+    def purchase_hint(self, **kwargs: Any) -> Any:
         cherrypy.response.headers["Content-Type"] = "text/plain; charset=utf-8"
         user, caller_key = self._caller()
         ctf_id = str(kwargs.get("ctf_id", "")).strip()
         number = kwargs.get("Number")
         hint_number = kwargs.get("HintNumber")
+        wants_json = _wants_json(kwargs)
 
         if not ctf_id or not self.represents_int(number) or not self.represents_int(hint_number):
             logger_admin.error(
@@ -355,15 +366,26 @@ class ScoreBoardController(controllers.BaseController):
         _signed_fields(participant)
         _copy_signature(participant, admin)
         _log_event(participant, admin)
+        if wants_json:
+            return _json_response({
+                "ok": True,
+                "ctf_id": ctf_id,
+                "number": str(number),
+                "hint_number": str(hint_number),
+                "hint": str(hint.get("Hint", "")),
+                "hint_cost": str(hint.get("HintCost", "0")),
+                "already_purchased": already_purchased,
+            })
         _redirect(f"/en-US/app/{APP}/question", participant)
 
     @expose_page(must_login=True, methods=["GET"])
-    def submit_question(self, **kwargs: Any) -> None:
+    def submit_question(self, **kwargs: Any) -> Any:
         cherrypy.response.headers["Content-Type"] = "text/plain; charset=utf-8"
         user, caller_key = self._caller()
         ctf_id = str(kwargs.get("ctf_id", "")).strip()
         submitted_answer = str(kwargs.get("Answer", ""))
         number = kwargs.get("Number")
+        wants_json = _wants_json(kwargs)
 
         if not ctf_id or not self.represents_int(number):
             logger_admin.error("Invalid question ctf_id=%r Number=%r", ctf_id, number)
@@ -410,7 +432,7 @@ class ScoreBoardController(controllers.BaseController):
         participant["Team"] = admin["Team"] = team
 
         for key, value in kwargs.items():
-            if key == "ctf_id":
+            if key in ("ctf_id", "ajax"):
                 continue
             value_text = str(value)
             if key in ("Answer", "Question"):
@@ -475,6 +497,18 @@ class ScoreBoardController(controllers.BaseController):
         _signed_fields(participant)
         _copy_signature(participant, admin)
         _log_event(participant, admin)
+        if wants_json:
+            return _json_response({
+                "ok": True,
+                "ctf_id": ctf_id,
+                "number": str(number),
+                "result": str(participant.get("Result", "")),
+                "base_points_awarded": str(participant.get("BasePointsAwarded", "0")),
+                "speed_bonus_awarded": str(participant.get("SpeedBonusAwarded", "0")),
+                "additional_bonus_awarded": str(participant.get("AdditionalBonusAwarded", "0")),
+                "penalty": str(participant.get("Penalty", "0")),
+                "solicit_bonus_info": str(participant.get("SolicitBonusInfo", "0")),
+            })
         _redirect(f"/en-US/app/{APP}/result", participant)
 
     @expose_page(must_login=True, methods=["GET"])
@@ -530,7 +564,7 @@ class ScoreBoardController(controllers.BaseController):
         }
 
         for key, value in kwargs.items():
-            if key == "ctf_id":
+            if key in ("ctf_id", "ajax"):
                 continue
             value_text = str(value)
             admin[key] = (

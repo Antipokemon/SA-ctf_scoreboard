@@ -472,3 +472,19 @@ ctf_eulas_accepted
 ```
 
 It does **not** own `ctf_questions`, `ctf_answers`, or `ctf_hints`; those are owned by `SA-ctf_scoreboard_admin`. It also does not own `ctf_events` or `ctf_registrations`; those are owned by `SA-ctf_registration`. The compatibility overlay keeps the participant-owned collection definitions explicitly so rebuilding this app cannot accidentally drop them.
+
+## Participant question experience
+
+The questions view is intentionally compact for large CTFs. It shows 20 questions per page, a completed/remaining/progress summary, and only the fields a participant needs while choosing the next challenge. Selecting a row opens the question detail page for answer submission and hints.
+
+The legacy expandable table row was removed. It depended on the retired `ctf_users` lookup and produced errors after participant identity moved to `SA-ctf_registration`. The `get_user_info` compatibility macros now use the `Team`, `DisplayUsername`, `Username`, and `user` fields already present in scoreboard events instead of requiring `ctf_users`.
+
+## Card-based challenge view and live team state
+
+The participant **Challenges** view uses a card grid instead of a long question table. Selecting a card opens an in-page modal where the participant can submit an answer and purchase hints without navigating away from the challenge list.
+
+The challenge state search refreshes every five seconds using the current `ctf_id` and team. As a result, when another team member submits a correct answer, all open team sessions update automatically: the challenge card moves to the solved state, the completed/remaining totals change, and an open modal for that challenge is updated without a page reload.
+
+The view provides client-side filters for all/open/solved/attempted challenges and a challenge search box. Solved cards use a distinct border so progress is visible at a glance.
+
+Answer and hint actions support an AJAX response mode used by the modal UI. Existing direct controller links continue to use the historical redirect workflow for compatibility.
