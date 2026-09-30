@@ -32,6 +32,53 @@ require([
         return isNaN(parsed) ? 0 : parsed;
     }
 
+    function eventState() {
+        return token("ctf_event_state").toUpperCase();
+    }
+
+    function eventPlayable() {
+        if (token("ctf_context_ready") !== "1" || eventState() !== "IN_PROGRESS") {
+            return false;
+        }
+        var starts = Date.parse(token("ctf_event_starts"));
+        var ends = Date.parse(token("ctf_event_ends"));
+        var now = Date.now();
+        if (!isNaN(starts) && now < starts) {
+            return false;
+        }
+        if (!isNaN(ends) && now > ends) {
+            return false;
+        }
+        return true;
+    }
+
+    function eventLockMessage() {
+        var state = eventState();
+        if (state === "COMPLETED") {
+            return "This CTF event has ended. Challenges are read-only; answers and new hint purchases are locked.";
+        }
+        if (state === "UPCOMING") {
+            return "This CTF event has not started yet. Challenges are read-only until the event begins.";
+        }
+        if (state === "DISABLED") {
+            return "This CTF event is disabled. Challenges are read-only.";
+        }
+        if (token("ctf_context_ready") !== "1") {
+            return "Waiting for the CTF event context. Challenge actions are temporarily locked.";
+        }
+        return "Challenge actions are currently locked.";
+    }
+
+    function updateEventGate() {
+        var playable = eventPlayable();
+        var $gate = $("#ctf_event_gate");
+        $gate.toggle(!playable).text(playable ? "" : eventLockMessage());
+        if (activeNumber !== null && rowByNumber[activeNumber]) {
+            updateModalFromRow(rowByNumber[activeNumber]);
+        }
+        $(".ctf-unlock-hint").prop("disabled", !playable);
+    }
+
     function statusClass(status) {
         if (status === "Correct") {
             return "is-solved";
@@ -52,7 +99,7 @@ require([
         return "Open";
     }
 
-    function humanizeCategory(value) {
+    function humanizeSubject(value) {
         var text = String(value || "Challenges").replace(/[_-]+/g, " ").trim();
         if (!text) {
             return "Challenges";
@@ -65,7 +112,7 @@ require([
         return {
             Number: number,
             ChallengeID: String(raw.ChallengeID || ("Q" + String(number).padStart(3, "0"))),
-            Category: String(raw.Category || "Challenges"),
+            Subject: String(raw.Subject || raw.Category || "Challenges"),
             Question: String(raw.Question || "Question " + number),
             Status: String(raw.Status || "Unanswered"),
             BasePoints: numberValue(raw.BasePoints),
@@ -171,7 +218,7 @@ require([
             return false;
         }
         if (searchText) {
-            var haystack = (row.ChallengeID + " " + row.Question + " " + row.Category).toLowerCase();
+            var haystack = (row.ChallengeID + " " + row.Question + " " + row.Subject).toLowerCase();
             if (haystack.indexOf(searchText) === -1) {
                 return false;
             }
@@ -203,6 +250,7 @@ require([
     function renderChallenges() {
         var $root = $("#ctf_challenge_sections").empty();
         var groups = {};
+        var subjectOrder = [];
         var visibleCount = 0;
 
         challengeRows.forEach(function(row) {
@@ -210,19 +258,22 @@ require([
                 return;
             }
             visibleCount += 1;
-            var key = row.Category || "Challenges";
+            var key = row.Subject || "Challenges";
             if (!groups[key]) {
                 groups[key] = [];
+                subjectOrder.push(key);
             }
             groups[key].push(row);
         });
 
-        Object.keys(groups).sort().forEach(function(category) {
-            var rows = groups[category];
-            var $section = $("<section/>", {class: "ctf-challenge-section"});
+        // Keep subjects in challenge-number order instead of alphabetizing them.
+        // This preserves the authored learning/attack progression in the CSV.
+        subjectOrder.forEach(function(subject) {
+            var rows = groups[subject];
+            var $section = $("<section/>", {class: "ctf-challenge-section", "data-subject": subject});
             var solved = rows.filter(function(row) { return row.Status === "Correct"; }).length;
             var $heading = $("<div/>", {class: "ctf-challenge-section-heading"});
-            $heading.append($("<h2/>", {text: humanizeCategory(category)}));
+            $heading.append($("<h2/>", {text: humanizeSubject(subject)}));
             $heading.append($("<span/>", {text: solved + " / " + rows.length + " solved"}));
             $section.append($heading);
 
@@ -251,8 +302,11 @@ require([
             .text(statusLabel(row.Status));
 
         var solved = row.Status === "Correct";
-        $("#ctf_answer_input").prop("disabled", solved);
-        $("#ctf_answer_submit").prop("disabled", solved).text(solved ? "Solved" : "Submit");
+        var playable = eventPlayable();
+        var disabled = solved || !playable;
+        var buttonText = solved ? "Solved" : (playable ? "Submit" : (eventState() === "COMPLETED" ? "Event ended" : "Locked"));
+        $("#ctf_answer_input").prop("disabled", disabled);
+        $("#ctf_answer_submit").prop("disabled", disabled).text(buttonText);
     }
 
     function updateRows(rows) {
@@ -298,11 +352,13 @@ require([
             if (purchased) {
                 $hint.append($("<div/>", {class: "ctf-hint-text", text: row.hint || ""}));
             } else {
+                var playable = eventPlayable();
                 $hint.append($("<button/>", {
                     type: "button",
                     class: "ctf-unlock-hint btn",
                     "data-hint-number": row.hint_number,
-                    text: "Unlock hint for " + row.hint_cost + " points"
+                    disabled: !playable,
+                    text: playable ? ("Unlock hint for " + row.hint_cost + " points") : "Hint locked - event not active"
                 }));
             }
             $root.append($hint);
@@ -375,6 +431,11 @@ require([
     function submitAnswer() {
         var row = rowByNumber[activeNumber];
         var answer = String($("#ctf_answer_input").val() || "");
+        if (!eventPlayable()) {
+            showModalMessage(eventLockMessage(), false);
+            updateEventGate();
+            return;
+        }
         if (!row || !answer.trim()) {
             showModalMessage("Enter an answer before submitting.", false);
             return;
@@ -421,13 +482,20 @@ require([
         }).always(function() {
             var current = rowByNumber[activeNumber];
             var solved = current && current.Status === "Correct";
-            $button.prop("disabled", solved).text(solved ? "Solved" : "Submit");
+            var playable = eventPlayable();
+            $button.prop("disabled", solved || !playable)
+                .text(solved ? "Solved" : (playable ? "Submit" : (eventState() === "COMPLETED" ? "Event ended" : "Locked")));
         });
     }
 
     function purchaseHint(hintNumber) {
         var row = rowByNumber[activeNumber];
         if (!row) {
+            return;
+        }
+        if (!eventPlayable()) {
+            showModalMessage(eventLockMessage(), false);
+            updateEventGate();
             return;
         }
         $.ajax({
@@ -492,4 +560,18 @@ require([
     $(document).on("click", ".ctf-unlock-hint", function() {
         purchaseHint(numberValue($(this).attr("data-hint-number")));
     });
+
+    $(document).on("ctf:event-context-ready", function() {
+        updateEventGate();
+        if (activeNumber !== null && rowByNumber[activeNumber]) {
+            loadHints(activeNumber);
+        }
+    });
+
+    $(document).on("ctf:event-context-failed", function() {
+        updateEventGate();
+    });
+
+    updateEventGate();
+    window.setInterval(updateEventGate, 1000);
 });

@@ -168,6 +168,35 @@ class RepoCompatibilityTests(unittest.TestCase):
                             msg=f"Invalid Simple XML id {identifier!r} in {rel}",
                         )
 
+
+    def test_event_context_refreshes_and_countdown_tracks_edits(self):
+        context = (ROOT / "appserver/static/ctf_event_context.js").read_text()
+        countdown = (ROOT / "appserver/static/instantiate_countdown.js").read_text()
+        self.assertIn('data: {include_completed: "1"}', context)
+        self.assertIn('window.setInterval(fetchContext, refreshMillis)', context)
+        self.assertIn('change:ctf_event_ends', countdown)
+        self.assertIn('change:ctf_event_state', countdown)
+        self.assertIn('Event has ended', countdown)
+
+    def test_event_window_is_enforced_server_side(self):
+        controller = (ROOT / "appserver/controllers/scoreboard_controller.py").read_text()
+        self.assertIn('class EventUnavailableError', controller)
+        self.assertIn('def _require_event_in_progress', controller)
+        self.assertGreaterEqual(controller.count('_require_event_in_progress(ctf_id, privileged)'), 3)
+        self.assertIn('This CTF event has ended. Answers and hints are locked.', controller)
+        self.assertGreaterEqual(controller.count('except EventUnavailableError as exc:'), 2)
+
+    def test_challenge_ui_locks_when_event_is_not_active(self):
+        questions = (ROOT / "default/data/ui/views/questions.xml").read_text()
+        js = (ROOT / "appserver/static/challenge_grid.js").read_text()
+        css = (ROOT / "appserver/static/questions.css").read_text()
+        self.assertIn('id="ctf_event_gate"', questions)
+        self.assertIn('function eventPlayable()', js)
+        self.assertIn('This CTF event has ended.', js)
+        self.assertIn('window.setInterval(updateEventGate, 1000)', js)
+        self.assertIn('.ctf-event-gate', css)
+        self.assertIn('color: #e8edf3 !important;', css)
+
     def test_xml_patcher_adds_version_1_1(self):
         spec = importlib.util.spec_from_file_location("builder", ROOT / "tools" / "build_from_upstream.py")
         builder = importlib.util.module_from_spec(spec)

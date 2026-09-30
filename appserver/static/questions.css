@@ -623,3 +623,61 @@ body.ctf-modal-open {
         max-height: calc(100vh - 32px);
     }
 }
+
+/* Keep challenge controls readable even when Splunk's button/theme rules win specificity. */
+#ctf_challenges_row,
+#ctf_challenges_row .dashboard-panel,
+.ctf-challenge-section,
+.ctf-challenge-section-heading,
+.ctf-challenge-section-heading h2,
+.ctf-challenge-section-heading span {
+    color: #e8edf3;
+}
+
+.ctf-challenge-card,
+.ctf-challenge-card:hover,
+.ctf-challenge-card:focus {
+    color: #e8edf3 !important;
+}
+
+.ctf-challenge-card .ctf-challenge-code,
+.ctf-challenge-card .ctf-card-status,
+.ctf-challenge-card .ctf-challenge-question,
+.ctf-challenge-card .ctf-challenge-card-bottom,
+.ctf-challenge-card .ctf-challenge-card-bottom span {
+    color: inherit !important;
+}
+
+.ctf-filter {
+    color: #dce5ed !important;
+}
+
+.ctf-filter.is-active {
+    color: #ffffff !important;
+}
+
+.ctf-challenge-search {
+    color: #e8edf3 !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.ctf-challenge-search::placeholder {
+    color: rgba(232, 237, 243, 0.55);
+}
+
+.ctf-event-gate {
+    margin: 14px 16px 0;
+    padding: 11px 13px;
+    border-radius: 7px;
+    border: 1px solid rgba(217, 164, 65, 0.72);
+    background: rgba(217, 164, 65, 0.10);
+    color: #f5d58b;
+    font-weight: 600;
+}
+
+.ctf-unlock-hint:disabled,
+#ctf_answer_submit:disabled,
+#ctf_answer_input:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}

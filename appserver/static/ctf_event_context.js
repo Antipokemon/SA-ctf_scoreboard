@@ -8,6 +8,8 @@ require([
     var defaultTokens = mvc.Components.get("default");
     var submittedTokens = mvc.Components.get("submitted");
     var endpoint = "/en-US/splunkd/__raw/services/ctf_registration/events";
+    var refreshMillis = 5000;
+    var lastImageRequest = null;
 
     function setToken(name, value) {
         defaultTokens.set(name, value);
@@ -42,8 +44,6 @@ require([
 
         add(requested);
 
-        // Older uploaded event records used an images/uploads path while some
-        // source-controlled images live directly under appserver/static/images.
         if (requested.indexOf("/images/uploads/") !== -1) {
             add(requested.replace("/images/uploads/", "/images/"));
         }
@@ -59,16 +59,22 @@ require([
             return;
         }
 
-        if ((attempt || 0) < 8) {
+        if ((attempt || 0) < 12) {
             window.setTimeout(function() {
                 writeEventImage(url, (attempt || 0) + 1);
             }, 100);
         }
     }
 
-    function setEventImage(imageUrl) {
+    function setEventImage(imageUrl, force) {
         var fallback = "/static/app/SA-ctf_scoreboard/ctflogo.png";
-        var candidates = eventImageCandidates(imageUrl);
+        var normalized = normalizeEventImageUrl(imageUrl);
+        if (!force && lastImageRequest === normalized) {
+            return;
+        }
+        lastImageRequest = normalized;
+
+        var candidates = eventImageCandidates(normalized);
         var index = 0;
 
         function tryNext() {
@@ -131,21 +137,10 @@ require([
         setToken("ctf_context_error", message);
         setToken("ctf_context_ready", "0");
         $("#ctf-context-error").text(message).show();
+        $(document).trigger("ctf:event-context-failed", [message]);
     }
 
-    $.ajax({
-        url: endpoint,
-        method: "GET",
-        dataType: "json",
-        cache: false
-    }).done(function(data) {
-        var selected = chooseEvent(data.events || []);
-
-        if (!selected) {
-            fail("No registered CTF could be selected. Open CTF Registration and register for an event.");
-            return;
-        }
-
+    function applyContext(data, selected) {
         var registration = selected.registration || {};
 
         setToken("ctf_id", selected.ctf_id || "");
@@ -159,10 +154,40 @@ require([
         setToken("ctf_Team", registration.Team || registration.DisplayUsername || data.username || "");
         setToken("ctf_SearchUrl", selected.search_url || "");
         setToken("ctf_image_url", selected.image_url || "");
-        setEventImage(selected.image_url || "");
-        $(document).trigger("ctf:event-context-ready", [selected]);
+        setEventImage(selected.image_url || "", false);
+        $("#ctf-context-error").hide().text("");
+        setToken("ctf_context_error", "");
         setToken("ctf_context_ready", "1");
-    }).fail(function(xhr) {
-        fail("Unable to load your CTF registration context: " + (xhr.responseText || xhr.statusText));
-    });
+        $(document).trigger("ctf:event-context-ready", [selected]);
+    }
+
+    function fetchContext() {
+        $.ajax({
+            url: endpoint,
+            method: "GET",
+            dataType: "json",
+            cache: false,
+            data: {include_completed: "1"}
+        }).done(function(data) {
+            var selected = chooseEvent(data.events || []);
+
+            if (!selected) {
+                fail("No registered CTF could be selected. Open CTF Registration and register for an event.");
+                return;
+            }
+
+            applyContext(data, selected);
+        }).fail(function(xhr) {
+            fail("Unable to load your CTF registration context: " + (xhr.responseText || xhr.statusText));
+        });
+    }
+
+    fetchContext();
+    window.setInterval(fetchContext, refreshMillis);
+
+    // If the dashboard body renders after the first context request, re-apply
+    // the selected event image from the token rather than leaving the fallback.
+    window.setTimeout(function() {
+        setEventImage(defaultTokens.get("ctf_image_url") || "", true);
+    }, 750);
 });

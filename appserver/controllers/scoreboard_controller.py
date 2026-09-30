@@ -17,6 +17,7 @@ import sys
 import time
 import urllib.parse
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
 
 import cherrypy
@@ -186,6 +187,50 @@ def _submission_eula_fields(username: str, session_key: str) -> Dict[str, str]:
     return _eula_fields(username, _kv("ctf_eulas_accepted", session_key))
 
 
+class EventUnavailableError(RuntimeError):
+    """Raised when a participant attempts to modify a CTF outside its live window."""
+
+
+def _parse_event_timestamp(value: Any) -> datetime:
+    text = str(value or "").strip()
+    if not text:
+        raise EventUnavailableError("The CTF event timing is not configured.")
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise EventUnavailableError("The CTF event timing is invalid.") from exc
+    if parsed.tzinfo is None:
+        raise EventUnavailableError("The CTF event timing must include a timezone.")
+    return parsed.astimezone(timezone.utc)
+
+
+def _enabled(value: Any) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _require_event_in_progress(ctf_id: str, session_key: str) -> Mapping[str, Any]:
+    events = _ctf_rows(_kv("ctf_events", session_key, app=REGISTRATION_APP), ctf_id)
+    if not events:
+        raise EventUnavailableError("The CTF event could not be found.")
+
+    event = events[0]
+    if not _enabled(event.get("enabled", False)):
+        raise EventUnavailableError("This CTF event is disabled.")
+
+    starts = _parse_event_timestamp(event.get("event_starts"))
+    ends = _parse_event_timestamp(event.get("event_ends"))
+    now = datetime.now(timezone.utc)
+    if ends <= starts:
+        raise EventUnavailableError("The CTF event window is invalid.")
+    if now < starts:
+        raise EventUnavailableError("This CTF event has not started yet.")
+    if now > ends:
+        raise EventUnavailableError("This CTF event has ended. Answers and hints are locked.")
+    return event
+
+
 def _event_lists(data: Mapping[str, Any]) -> List[str]:
     values: List[str] = []
     for key, value in data.items():
@@ -337,6 +382,7 @@ class ScoreBoardController(controllers.BaseController):
 
         try:
             privileged = _service_session_key()
+            _require_event_in_progress(ctf_id, privileged)
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
             questions = _ctf_rows(_kv("ctf_questions", privileged, app=ADMIN_APP), ctf_id)
@@ -344,6 +390,11 @@ class ScoreBoardController(controllers.BaseController):
             hints = _ctf_rows(_kv("ctf_hints", privileged, app=ADMIN_APP), ctf_id)
             entitlements = _ctf_rows(_kv("ctf_hint_entitlements", caller_key), ctf_id)
             registrations = _kv("ctf_registrations", privileged, app=REGISTRATION_APP)
+        except EventUnavailableError as exc:
+            logger_admin.info("Blocked CTF action ctf_id=%s user=%s: %s", ctf_id, user, exc)
+            if wants_json:
+                return _json_error(str(exc), 409)
+            _redirect(ERROR_VIEW)
         except PermissionError as exc:
             logger_admin.error(
                 "User %s attempted to play CTF %s without registration/EULA",
@@ -476,11 +527,17 @@ class ScoreBoardController(controllers.BaseController):
 
         try:
             privileged = _service_session_key()
+            _require_event_in_progress(ctf_id, privileged)
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
             answers = _ctf_rows(_kv("ctf_answers", privileged, app=ADMIN_APP), ctf_id)
             questions = _ctf_rows(_kv("ctf_questions", privileged, app=ADMIN_APP), ctf_id)
             eula = _submission_eula_fields(user, caller_key)
+        except EventUnavailableError as exc:
+            logger_admin.info("Blocked CTF action ctf_id=%s user=%s: %s", ctf_id, user, exc)
+            if wants_json:
+                return _json_error(str(exc), 409)
+            _redirect(ERROR_VIEW)
         except PermissionError as exc:
             logger_admin.error(
                 "User %s attempted to play CTF %s without registration/EULA",
@@ -624,10 +681,14 @@ class ScoreBoardController(controllers.BaseController):
 
         try:
             privileged = _service_session_key()
+            _require_event_in_progress(ctf_id, privileged)
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
             questions = _ctf_rows(_kv("ctf_questions", privileged, app=ADMIN_APP), ctf_id)
             eula = _eula_fields(user, _kv("ctf_eulas_accepted", caller_key))
+        except EventUnavailableError as exc:
+            logger_admin.info("Blocked bonus action ctf_id=%s user=%s: %s", ctf_id, user, exc)
+            _redirect(ERROR_VIEW)
         except PermissionError:
             _redirect(f"/en-US/app/{APP}/user_agreement_required")
         except Exception:
