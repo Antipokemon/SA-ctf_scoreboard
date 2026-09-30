@@ -16,6 +16,24 @@ require([
         }
     }
 
+    function setEventImage(imageUrl) {
+        var fallback = "/static/app/SA-ctf_scoreboard/ctflogo.png";
+        var requested = String(imageUrl || "").trim();
+        var $logo = $("#ctflogo");
+
+        if (!$logo.length) {
+            return;
+        }
+
+        $logo.off("error.ctfEventImage");
+        $logo.on("error.ctfEventImage", function() {
+            if ($(this).attr("src") !== fallback) {
+                $(this).attr("src", fallback);
+            }
+        });
+        $logo.attr("src", requested || fallback);
+    }
+
     function requestedCtfId() {
         try {
             return new URLSearchParams(window.location.search).get("ctf_id") || "";
@@ -86,6 +104,7 @@ require([
         setToken("ctf_Team", registration.Team || registration.DisplayUsername || data.username || "");
         setToken("ctf_SearchUrl", selected.search_url || "");
         setToken("ctf_image_url", selected.image_url || "");
+        setEventImage(selected.image_url || "");
         setToken("ctf_context_ready", "1");
     }).fail(function(xhr) {
         fail("Unable to load your CTF registration context: " + (xhr.responseText || xhr.statusText));

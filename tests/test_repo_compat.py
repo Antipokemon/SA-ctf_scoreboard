@@ -14,6 +14,9 @@ class RepoCompatibilityTests(unittest.TestCase):
         for command in ("getanswer", "gethints", "validateevents"):
             self.assertEqual(cfg[command]["chunked"].lower(), "false")
             self.assertEqual(cfg[command]["python.required"].replace(" ", ""), "3.9,3.13")
+        for command in ("getanswer", "gethints"):
+            self.assertEqual(cfg[command]["enableheader"].lower(), "true")
+            self.assertEqual(cfg[command]["passauth"].lower(), "true")
 
     def test_controller_drops_old_dependencies(self):
         text = (ROOT / "appserver" / "controllers" / "scoreboard_controller.py").read_text()
@@ -31,7 +34,7 @@ class RepoCompatibilityTests(unittest.TestCase):
         self.assertIn('ADMIN_APP = "SA-ctf_scoreboard_admin"', text)
         self.assertNotIn('_kv("ctf_questions", caller_key)', text)
         self.assertNotIn('_kv("ctf_questions", session_key)', text)
-        self.assertGreaterEqual(text.count('_kv("ctf_questions", caller_key, app=ADMIN_APP)'), 3)
+        self.assertGreaterEqual(text.count('_kv("ctf_questions", privileged, app=ADMIN_APP)'), 3)
         self.assertIn('_kv("ctf_questions", session_key, app=ADMIN_APP)', text)
 
     def test_scoreboard_does_not_own_questions_collection(self):
@@ -102,6 +105,29 @@ class RepoCompatibilityTests(unittest.TestCase):
         self.assertGreaterEqual(text.count("if wants_json:"), 2)
         self.assertIn('"result": str(participant.get("Result", ""))', text)
         self.assertIn('"hint": str(hint.get("Hint", ""))', text)
+
+
+    def test_event_image_is_bound_from_registration_context(self):
+        js = (ROOT / "appserver/static/ctf_event_context.js").read_text()
+        self.assertIn('function setEventImage', js)
+        self.assertIn('selected.image_url', js)
+        self.assertIn('/static/app/SA-ctf_scoreboard/ctflogo.png', js)
+        self.assertIn('$("#ctflogo")', js)
+
+    def test_modal_hints_use_json_controller_endpoint(self):
+        js = (ROOT / "appserver/static/challenge_grid.js").read_text()
+        controller = (ROOT / "appserver/controllers/scoreboard_controller.py").read_text()
+        self.assertIn('scoreboard_controller/challenge_hints', js)
+        self.assertNotIn('new SearchManager', js)
+        self.assertIn('def challenge_hints', controller)
+        self.assertIn('"hints": rows', controller)
+
+    def test_ajax_actions_return_json_errors_and_allow_no_eula_configuration(self):
+        controller = (ROOT / "appserver/controllers/scoreboard_controller.py").read_text()
+        self.assertIn('def _json_error', controller)
+        self.assertIn('def _submission_eula_fields', controller)
+        self.assertIn('if not defaults:', controller)
+        self.assertGreaterEqual(controller.count('if wants_json:'), 8)
 
     def test_simplexml_ids_are_valid_identifiers(self):
         import re

@@ -172,6 +172,20 @@ def _eula_fields(username: str, accepted: Iterable[Mapping[str, Any]]) -> Dict[s
     raise PermissionError("user agreement has not been accepted")
 
 
+def _submission_eula_fields(username: str, session_key: str) -> Dict[str, str]:
+    """Require agreement only when a default EULA is actually configured."""
+    configured = _kv("ctf_eulas", session_key)
+    defaults = [row for row in configured if str(row.get("EulaDefault", "0")) == "1"]
+    if not defaults:
+        return {
+            "EulaDateAccepted": "0",
+            "EulaId": "0",
+            "EulaName": "",
+            "EulaUsername": username,
+        }
+    return _eula_fields(username, _kv("ctf_eulas_accepted", session_key))
+
+
 def _event_lists(data: Mapping[str, Any]) -> List[str]:
     values: List[str] = []
     for key, value in data.items():
@@ -201,6 +215,13 @@ def _json_response(payload: Mapping[str, Any], status: int = 200) -> str:
     cherrypy.response.status = status
     cherrypy.response.headers["Content-Type"] = "application/json; charset=utf-8"
     return json.dumps(dict(payload), ensure_ascii=False)
+
+
+def _json_error(message: str, status: int = 400, redirect: str = "") -> str:
+    payload: Dict[str, Any] = {"ok": False, "error": message}
+    if redirect:
+        payload["redirect"] = redirect
+    return _json_response(payload, status=status)
 
 
 def _signed_fields(data: MutableMapping[str, Any]) -> None:
@@ -244,6 +265,57 @@ class ScoreBoardController(controllers.BaseController):
         return cherrypy.session["user"]["name"], cherrypy.session.get("sessionKey")
 
     @expose_page(must_login=True, methods=["GET"])
+    def challenge_hints(self, **kwargs: Any) -> Any:
+        """Return team-scoped hint metadata for the card modal."""
+        user, caller_key = self._caller()
+        ctf_id = str(kwargs.get("ctf_id", "")).strip()
+        number = kwargs.get("Number")
+        if not ctf_id or not self.represents_int(number):
+            return _json_error("Invalid challenge hint request.", 400)
+
+        try:
+            privileged = _service_session_key()
+            registration = _registration_for(user, ctf_id, privileged)
+            team = _team_from_registration(registration, user)
+            hints = _ctf_rows(_kv("ctf_hints", privileged, app=ADMIN_APP), ctf_id)
+            entitlements = _ctf_rows(_kv("ctf_hint_entitlements", caller_key), ctf_id)
+            registrations = _kv("ctf_registrations", privileged, app=REGISTRATION_APP)
+        except PermissionError as exc:
+            return _json_error(str(exc), 403)
+        except Exception:
+            logger_admin.exception("Unable to load challenge hints")
+            return _json_error("Unable to load hints for this challenge.", 500)
+
+        def registered_team(username: str) -> str:
+            for row in registrations:
+                if (
+                    str(row.get("ctf_id", "")) == ctf_id
+                    and str(row.get("Username", "")) == username
+                ):
+                    return _team_from_registration(row, username)
+            return username
+
+        purchased = {
+            (str(row.get("Number", "")), str(row.get("HintNumber", "")))
+            for row in entitlements
+            if registered_team(str(row.get("user", ""))) == team
+        }
+        rows: List[Dict[str, Any]] = []
+        for hint in hints:
+            if str(hint.get("Number", "")) != str(number):
+                continue
+            key = (str(number), str(hint.get("HintNumber", "")))
+            unlocked = key in purchased
+            rows.append({
+                "hint_number": str(hint.get("HintNumber", "")),
+                "hint_cost": str(hint.get("HintCost", "0")),
+                "purchased": unlocked,
+                "hint": str(hint.get("Hint", "")) if unlocked else "",
+            })
+        rows.sort(key=lambda row: int(row["hint_number"]) if str(row["hint_number"]).isdigit() else 0)
+        return _json_response({"ok": True, "ctf_id": ctf_id, "number": str(number), "hints": rows})
+
+    @expose_page(must_login=True, methods=["GET"])
     def purchase_hint(self, **kwargs: Any) -> Any:
         cherrypy.response.headers["Content-Type"] = "text/plain; charset=utf-8"
         user, caller_key = self._caller()
@@ -259,27 +331,32 @@ class ScoreBoardController(controllers.BaseController):
                 number,
                 hint_number,
             )
+            if wants_json:
+                return _json_error("Invalid hint request.", 400)
             _redirect(ERROR_VIEW)
 
         try:
             privileged = _service_session_key()
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
-            questions = _ctf_rows(_kv("ctf_questions", caller_key, app=ADMIN_APP), ctf_id)
-            accepted = _kv("ctf_eulas_accepted", caller_key)
-            eula = _eula_fields(user, accepted)
+            questions = _ctf_rows(_kv("ctf_questions", privileged, app=ADMIN_APP), ctf_id)
+            eula = _submission_eula_fields(user, caller_key)
             hints = _ctf_rows(_kv("ctf_hints", privileged, app=ADMIN_APP), ctf_id)
             entitlements = _ctf_rows(_kv("ctf_hint_entitlements", caller_key), ctf_id)
             registrations = _kv("ctf_registrations", privileged, app=REGISTRATION_APP)
-        except PermissionError:
+        except PermissionError as exc:
             logger_admin.error(
                 "User %s attempted to play CTF %s without registration/EULA",
                 user,
                 ctf_id,
             )
+            if wants_json:
+                return _json_error(str(exc), 403, f"/en-US/app/{APP}/welcome?ctf_id={urllib.parse.quote(ctf_id)}")
             _redirect(f"/en-US/app/{APP}/user_agreement_required")
         except Exception:
             logger_admin.exception("Unable to load data required to purchase a hint")
+            if wants_json:
+                return _json_error("Unable to load data required to purchase this hint.", 500)
             _redirect(ERROR_VIEW)
 
         question = next(
@@ -302,6 +379,8 @@ class ScoreBoardController(controllers.BaseController):
                 number,
                 hint_number,
             )
+            if wants_json:
+                return _json_error("The requested hint could not be found.", 404)
             _redirect(ERROR_VIEW)
 
         def registered_team(username: str) -> str:
@@ -338,6 +417,8 @@ class ScoreBoardController(controllers.BaseController):
                 )
             except Exception:
                 logger_admin.exception("Unable to write hint entitlement")
+                if wants_json:
+                    return _json_error("Unable to unlock this hint.", 500)
                 _redirect(ERROR_VIEW)
 
         participant: "collections.OrderedDict[str, str]" = collections.OrderedDict()
@@ -389,6 +470,8 @@ class ScoreBoardController(controllers.BaseController):
 
         if not ctf_id or not self.represents_int(number):
             logger_admin.error("Invalid question ctf_id=%r Number=%r", ctf_id, number)
+            if wants_json:
+                return _json_error("Invalid question submission.", 400)
             _redirect(ERROR_VIEW)
 
         try:
@@ -396,17 +479,21 @@ class ScoreBoardController(controllers.BaseController):
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
             answers = _ctf_rows(_kv("ctf_answers", privileged, app=ADMIN_APP), ctf_id)
-            questions = _ctf_rows(_kv("ctf_questions", caller_key, app=ADMIN_APP), ctf_id)
-            eula = _eula_fields(user, _kv("ctf_eulas_accepted", caller_key))
-        except PermissionError:
+            questions = _ctf_rows(_kv("ctf_questions", privileged, app=ADMIN_APP), ctf_id)
+            eula = _submission_eula_fields(user, caller_key)
+        except PermissionError as exc:
             logger_admin.error(
                 "User %s attempted to play CTF %s without registration/EULA",
                 user,
                 ctf_id,
             )
+            if wants_json:
+                return _json_error(str(exc), 403, f"/en-US/app/{APP}/welcome?ctf_id={urllib.parse.quote(ctf_id)}")
             _redirect(f"/en-US/app/{APP}/user_agreement_required")
         except Exception:
             logger_admin.exception("Unable to load question/answer data")
+            if wants_json:
+                return _json_error("Unable to load the question and answer data.", 500)
             _redirect(ERROR_VIEW)
 
         question = next(
@@ -423,6 +510,8 @@ class ScoreBoardController(controllers.BaseController):
                 ctf_id,
                 number,
             )
+            if wants_json:
+                return _json_error("This question does not have a matching answer record.", 404)
             _redirect(ERROR_VIEW)
 
         participant: "collections.OrderedDict[str, str]" = collections.OrderedDict()
@@ -537,7 +626,7 @@ class ScoreBoardController(controllers.BaseController):
             privileged = _service_session_key()
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
-            questions = _ctf_rows(_kv("ctf_questions", caller_key, app=ADMIN_APP), ctf_id)
+            questions = _ctf_rows(_kv("ctf_questions", privileged, app=ADMIN_APP), ctf_id)
             eula = _eula_fields(user, _kv("ctf_eulas_accepted", caller_key))
         except PermissionError:
             _redirect(f"/en-US/app/{APP}/user_agreement_required")

@@ -1,9 +1,8 @@
 require([
     "jquery",
     "splunkjs/mvc",
-    "splunkjs/mvc/searchmanager",
     "splunkjs/mvc/simplexml/ready!"
-], function($, mvc, SearchManager) {
+], function($, mvc) {
     "use strict";
 
     var challengeManager = mvc.Components.get("challengeData");
@@ -18,8 +17,6 @@ require([
     var activeNumber = null;
     var activeFilter = "all";
     var searchText = "";
-    var hintsManager = null;
-    var hintsResults = null;
     var initialized = false;
 
     function token(name) {
@@ -274,82 +271,79 @@ require([
         $("body").removeClass("ctf-modal-open");
         $("#ctf_modal_message").hide().removeClass("is-success is-error").text("");
         $("#ctf_modal_hints").empty();
-        if (hintsManager) {
-            try { hintsManager.cancel(); } catch (e) { /* no-op */ }
-        }
     }
 
     function splQuote(value) {
         return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     }
 
-    function renderHints(data) {
-        var rows = resultsToObjects(data);
+    function renderHints(rows) {
         var $root = $("#ctf_modal_hints").empty();
         $("#ctf_modal_hints_loading").hide();
+        rows = rows || [];
         if (!rows.length) {
             $root.append($("<div/>", {class: "ctf-no-hints", text: "No hints are available for this challenge."}));
             return;
         }
         rows.forEach(function(row) {
-            var masked = String(row.Hint || "") === "Your team has not purchased this hint yet!";
+            var purchased = row.purchased === true || String(row.purchased) === "true";
             var $hint = $("<div/>", {class: "ctf-hint-item"});
             var $header = $("<div/>", {class: "ctf-hint-header"});
-            $header.append($("<strong/>", {text: "Hint " + row.HintNumber}));
-            $header.append($("<span/>", {text: row.HintCost + " pts"}));
+            $header.append($("<strong/>", {text: "Hint " + row.hint_number}));
+            $header.append($("<span/>", {text: row.hint_cost + " pts"}));
             $hint.append($header);
-            if (masked) {
+            if (purchased) {
+                $hint.append($("<div/>", {class: "ctf-hint-text", text: row.hint || ""}));
+            } else {
                 $hint.append($("<button/>", {
                     type: "button",
                     class: "ctf-unlock-hint btn",
-                    "data-hint-number": row.HintNumber,
-                    text: "Unlock hint for " + row.HintCost + " points"
+                    "data-hint-number": row.hint_number,
+                    text: "Unlock hint for " + row.hint_cost + " points"
                 }));
-            } else {
-                $hint.append($("<div/>", {class: "ctf-hint-text", text: row.Hint || ""}));
             }
             $root.append($hint);
         });
     }
 
+    function ajaxErrorMessage(xhr, fallback) {
+        if (xhr && xhr.responseJSON && xhr.responseJSON.error) {
+            return String(xhr.responseJSON.error);
+        }
+        if (xhr && xhr.responseText) {
+            try {
+                var parsed = JSON.parse(xhr.responseText);
+                if (parsed && parsed.error) {
+                    return String(parsed.error);
+                }
+            } catch (e) { /* response was not JSON */ }
+        }
+        return fallback;
+    }
+
     function loadHints(number) {
-        var ctfId = token("ctf_id");
         $("#ctf_modal_hints_loading").show().text("Loading hints…");
         $("#ctf_modal_hints").empty();
 
-        var hintSearch = "| inputlookup ctf_questions " +
-            "| search ctf_id=\"" + splQuote(ctfId) + "\" Number=" + number + " " +
-            "| eval Attempts=0 " +
-            "| fields ctf_id Number " +
-            "| gethints " +
-            "| mvexpand Hints " +
-            "| spath input=Hints " +
-            "| fields HintNumber HintCost Hint " +
-            "| sort 0 + HintNumber";
-
-        if (!hintsManager) {
-            hintsManager = new SearchManager({
-                id: "ctfChallengeHintsDynamic",
-                autostart: false,
-                cache: false,
-                earliest_time: "0",
-                latest_time: "now",
-                search: "| makeresults | head 0"
-            });
-            hintsResults = hintsManager.data("results", {count: 0});
-            hintsResults.on("data", function() {
-                renderHints(hintsResults.data());
-            });
-            hintsManager.on("search:error", function(message) {
-                $("#ctf_modal_hints_loading").text("Unable to load hints.");
-                window.console.error("Challenge hint search failed", message);
-            });
-        } else {
-            try { hintsManager.cancel(); } catch (e) { /* no-op */ }
-        }
-
-        hintsManager.settings.set("search", hintSearch);
-        hintsManager.startSearch();
+        $.ajax({
+            url: "/en-US/custom/SA-ctf_scoreboard/scoreboard_controller/challenge_hints",
+            method: "GET",
+            dataType: "json",
+            cache: false,
+            data: {
+                ctf_id: token("ctf_id"),
+                Number: number,
+                ajax: "1"
+            }
+        }).done(function(data) {
+            renderHints(data.hints || []);
+        }).fail(function(xhr) {
+            $("#ctf_modal_hints_loading").hide();
+            $("#ctf_modal_hints").empty().append($("<div/>", {
+                class: "ctf-no-hints is-error",
+                text: ajaxErrorMessage(xhr, "Unable to load hints.")
+            }));
+        });
     }
 
     function openModal(number) {
@@ -420,11 +414,7 @@ require([
             renderChallenges();
             updateModalFromRow(row);
         }).fail(function(xhr) {
-            var message = "Unable to submit the answer.";
-            if (xhr.responseJSON && xhr.responseJSON.error) {
-                message = xhr.responseJSON.error;
-            }
-            showModalMessage(message, false);
+            showModalMessage(ajaxErrorMessage(xhr, "Unable to submit the answer."), false);
         }).always(function() {
             var current = rowByNumber[activeNumber];
             var solved = current && current.Status === "Correct";
@@ -453,11 +443,7 @@ require([
             showModalMessage(prefix + String(data.hint || ""), true);
             loadHints(row.Number);
         }).fail(function(xhr) {
-            var message = "Unable to unlock the hint.";
-            if (xhr.responseJSON && xhr.responseJSON.error) {
-                message = xhr.responseJSON.error;
-            }
-            showModalMessage(message, false);
+            showModalMessage(ajaxErrorMessage(xhr, "Unable to unlock the hint."), false);
         });
     }
 

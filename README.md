@@ -488,3 +488,11 @@ The challenge state search refreshes every five seconds using the current `ctf_i
 The view provides client-side filters for all/open/solved/attempted challenges and a challenge search box. Solved cards use a distinct border so progress is visible at a glance.
 
 Answer and hint actions support an AJAX response mode used by the modal UI. Existing direct controller links continue to use the historical redirect workflow for compatibility.
+
+## Challenge modal runtime behavior
+
+The card-based Challenges view binds the event image from `SA-ctf_registration.ctf_events.image_url` after the event context is loaded. If the configured image cannot be loaded, the built-in scoreboard shield is used as a fallback.
+
+Challenge-modal hints are retrieved from the scoreboard controller as JSON. The controller reads protected hint text from `SA-ctf_scoreboard_admin`, applies team-scoped hint entitlements, and returns either an unlock action or the previously purchased hint text. The legacy `gethints` search command remains available and receives the caller session key through `passauth = true`.
+
+Answer submission and hint purchase use JSON responses when called from the modal. Validation and permission failures are returned to the modal instead of redirecting an AJAX request to an HTML error page. If no default CTF EULA is configured, answer and hint actions do not require an acceptance record. If a default EULA is configured, acceptance is still required.
