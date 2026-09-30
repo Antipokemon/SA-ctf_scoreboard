@@ -451,3 +451,24 @@ Splunk Web and the browser may cache static assets. Restart Splunk after deploym
 
 - `SA-ctf_registration` — CTF definitions, time windows, participant registration, and role assignment
 - `SA-ctf_scoreboard_admin` — answers, hints, content administration, and CTF administration
+
+## Question collection ownership
+
+`SA-ctf_scoreboard` does not own the `ctf_questions` KV Store. The authoritative `ctf_questions`, `ctf_answers`, and `ctf_hints` collections live in `SA-ctf_scoreboard_admin`.
+
+Participant dashboards continue to use `| inputlookup ctf_questions`; the admin app exports that lookup system-wide with participant read access. Controller code reads `ctf_questions` explicitly from the `SA-ctf_scoreboard_admin` namespace. This avoids duplicate same-named collections whose resolution changes depending on app context or upgrade order.
+
+## Participant-app KV Store ownership
+
+This app owns participant/runtime collections such as:
+
+```text
+ctf_hint_entitlements
+ctf_badges
+ctf_badge_entitlements
+ctf_stealth
+ctf_eulas
+ctf_eulas_accepted
+```
+
+It does **not** own `ctf_questions`, `ctf_answers`, or `ctf_hints`; those are owned by `SA-ctf_scoreboard_admin`. It also does not own `ctf_events` or `ctf_registrations`; those are owned by `SA-ctf_registration`. The compatibility overlay keeps the participant-owned collection definitions explicitly so rebuilding this app cannot accidentally drop them.

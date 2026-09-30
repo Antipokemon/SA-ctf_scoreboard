@@ -26,6 +26,36 @@ class RepoCompatibilityTests(unittest.TestCase):
         self.assertIn('definition = | validateevents | search Validated="1"', text)
         self.assertNotIn('definition = | eval Validated="1"', text)
 
+    def test_questions_are_read_from_admin_app(self):
+        text = (ROOT / "appserver/controllers/scoreboard_controller.py").read_text()
+        self.assertIn('ADMIN_APP = "SA-ctf_scoreboard_admin"', text)
+        self.assertNotIn('_kv("ctf_questions", caller_key)', text)
+        self.assertNotIn('_kv("ctf_questions", session_key)', text)
+        self.assertGreaterEqual(text.count('_kv("ctf_questions", caller_key, app=ADMIN_APP)'), 3)
+        self.assertIn('_kv("ctf_questions", session_key, app=ADMIN_APP)', text)
+
+    def test_scoreboard_does_not_own_questions_collection(self):
+        collections = (ROOT / "default/collections.conf").read_text()
+        transforms = (ROOT / "default/transforms.conf").read_text()
+        self.assertNotIn("[ctf_questions]", collections)
+        self.assertNotIn("[ctf_questions]", transforms)
+        self.assertNotIn("[ctf_events]", collections)
+        self.assertNotIn("[ctf_registrations]", collections)
+
+    def test_participant_owned_collections_survive_overlay_builds(self):
+        collections = (ROOT / "default/collections.conf").read_text()
+        transforms = (ROOT / "default/transforms.conf").read_text()
+        for name in (
+            "ctf_hint_entitlements",
+            "ctf_badges",
+            "ctf_badge_entitlements",
+            "ctf_stealth",
+            "ctf_eulas",
+            "ctf_eulas_accepted",
+        ):
+            self.assertIn(f"[{name}]", collections)
+            self.assertIn(f"[{name}]", transforms)
+
     def test_xml_patcher_adds_version_1_1(self):
         spec = importlib.util.spec_from_file_location("builder", ROOT / "tools" / "build_from_upstream.py")
         builder = importlib.util.module_from_spec(spec)

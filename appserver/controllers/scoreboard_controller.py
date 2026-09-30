@@ -254,7 +254,7 @@ class ScoreBoardController(controllers.BaseController):
             privileged = _service_session_key()
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
-            questions = _ctf_rows(_kv("ctf_questions", caller_key), ctf_id)
+            questions = _ctf_rows(_kv("ctf_questions", caller_key, app=ADMIN_APP), ctf_id)
             accepted = _kv("ctf_eulas_accepted", caller_key)
             eula = _eula_fields(user, accepted)
             hints = _ctf_rows(_kv("ctf_hints", privileged, app=ADMIN_APP), ctf_id)
@@ -374,7 +374,7 @@ class ScoreBoardController(controllers.BaseController):
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
             answers = _ctf_rows(_kv("ctf_answers", privileged, app=ADMIN_APP), ctf_id)
-            questions = _ctf_rows(_kv("ctf_questions", caller_key), ctf_id)
+            questions = _ctf_rows(_kv("ctf_questions", caller_key, app=ADMIN_APP), ctf_id)
             eula = _eula_fields(user, _kv("ctf_eulas_accepted", caller_key))
         except PermissionError:
             logger_admin.error(
@@ -503,7 +503,7 @@ class ScoreBoardController(controllers.BaseController):
             privileged = _service_session_key()
             registration = _registration_for(user, ctf_id, privileged)
             team = _team_from_registration(registration, user)
-            questions = _ctf_rows(_kv("ctf_questions", caller_key), ctf_id)
+            questions = _ctf_rows(_kv("ctf_questions", caller_key, app=ADMIN_APP), ctf_id)
             eula = _eula_fields(user, _kv("ctf_eulas_accepted", caller_key))
         except PermissionError:
             _redirect(f"/en-US/app/{APP}/user_agreement_required")
@@ -617,7 +617,7 @@ class ScoreBoardController(controllers.BaseController):
 
         try:
             privileged = _service_session_key()
-            questions = _ctf_rows(_kv("ctf_questions", session_key), ctf_id)
+            questions = _ctf_rows(_kv("ctf_questions", session_key, app=ADMIN_APP), ctf_id)
             registrations = _kv(
                 "ctf_registrations",
                 privileged,
