@@ -112,7 +112,10 @@ require([
         return {
             Number: number,
             ChallengeID: String(raw.ChallengeID || ("Q" + String(number).padStart(3, "0"))),
-            Subject: String(raw.Subject || raw.Category || "Challenges"),
+            Subject: (function() {
+                var subject = String(raw.Subject || raw.Category || "").trim();
+                return subject || "Challenges";
+            }()),
             Question: String(raw.Question || "Question " + number),
             Status: String(raw.Status || "Unanswered"),
             BasePoints: numberValue(raw.BasePoints),
