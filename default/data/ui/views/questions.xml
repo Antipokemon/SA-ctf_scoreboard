@@ -10,33 +10,7 @@
     <query>
 | inputlookup ctf_questions
 | search ctf_id="$ctf_id$"
-| eval Subject=case(
-        len(trim(Subject))&gt;0,Subject,
-        len(trim(Category))&gt;0,Category,
-        Number&gt;=1 AND Number&lt;=15,"environment_familiarization",
-        Number&gt;=16 AND Number&lt;=20,"external_scanning",
-        Number&gt;=21 AND Number&lt;=30,"recon",
-        Number&gt;=31 AND Number&lt;=45,"initial_access",
-        Number&gt;=46 AND Number&lt;=47,"execution",
-        Number&gt;=48 AND Number&lt;=65,"discovery",
-        Number&gt;=66 AND Number&lt;=73,"privilege_escalation",
-        Number&gt;=74 AND Number&lt;=85,"credential_access",
-        Number&gt;=86 AND Number&lt;=92,"persistence",
-        Number&gt;=93 AND Number&lt;=100,"command_and_control",
-        Number&gt;=101 AND Number&lt;=108,"gitlab",
-        Number&gt;=109 AND Number&lt;=120,"cloud",
-        Number&gt;=121 AND Number&lt;=128,"lateral_movement",
-        Number&gt;=129 AND Number&lt;=130,"execution",
-        Number&gt;=131 AND Number&lt;=133,"detection_triage",
-        Number&gt;=134 AND Number&lt;=145,"discovery",
-        Number&gt;=146 AND Number&lt;=160,"lateral_movement",
-        Number&gt;=161 AND Number&lt;=167,"collection",
-        Number&gt;=168 AND Number&lt;=173,"staging",
-        Number&gt;=174 AND Number&lt;=178,"exfiltration",
-        Number=179,"cleanup",
-        Number=180,"reconstruction",
-        true(),"Challenges"
-  )
+| eval Subject=coalesce(Subject,Category,"Challenges")
 | eval ChallengeID=coalesce(ChallengeID,printf("Q%03d",Number))
 | fields Number Question BasePoints Subject ChallengeID
 | join type=left Number

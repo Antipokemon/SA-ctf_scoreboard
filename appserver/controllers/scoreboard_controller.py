@@ -8,6 +8,7 @@ indexes, macros, and admin companion app continue to work.
 from __future__ import annotations
 
 import collections
+from decimal import Decimal, InvalidOperation
 import configparser
 import json
 import logging
@@ -132,6 +133,38 @@ def _ctf_rows(rows: Iterable[Mapping[str, Any]], ctf_id: str) -> List[Dict[str, 
     wanted = str(ctf_id)
     return [dict(row) for row in rows if str(row.get("ctf_id", "")) == wanted]
 
+
+
+def _normalize_sequence(value: Any, separator: str) -> List[str]:
+    return [part.strip() for part in str(value or "").strip().split(separator)]
+
+
+def _answer_matches(submitted: Any, official: Any, answer_type: Any) -> bool:
+    """Evaluate answers using Silk Specter's answer_type metadata."""
+    submitted_text = str(submitted or "").strip()
+    official_text = str(official or "").strip()
+    kind = str(answer_type or "case_insensitive").strip().lower()
+
+    if kind == "exact":
+        return submitted_text == official_text
+    if kind == "case_insensitive":
+        return submitted_text.casefold() == official_text.casefold()
+    if kind == "numeric":
+        try:
+            return Decimal(submitted_text) == Decimal(official_text)
+        except (InvalidOperation, ValueError):
+            return False
+    if kind == "set":
+        submitted_values = {v.casefold() for v in _normalize_sequence(submitted_text, ";") if v}
+        official_values = {v.casefold() for v in _normalize_sequence(official_text, ";") if v}
+        return submitted_values == official_values
+    if kind == "ordered_sequence":
+        submitted_values = [v.casefold() for v in _normalize_sequence(submitted_text, ">") if v]
+        official_values = [v.casefold() for v in _normalize_sequence(official_text, ">") if v]
+        return submitted_values == official_values
+
+    # Backward compatibility for legacy content or unknown values.
+    return submitted_text.casefold() == official_text.casefold()
 
 def _registration_for(
     username: str,
@@ -599,9 +632,13 @@ class ScoreBoardController(controllers.BaseController):
         admin["AnswerOfficial"] = f'"{str(answer.get("Answer", "")).replace(chr(34), chr(39))}"'
 
         now = int(time.time())
-        correct = submitted_answer.lower().strip() == str(
-            answer.get("Answer", "")
-        ).lower().strip()
+        answer_type = str(answer.get("AnswerType", "") or "case_insensitive")
+        admin["AnswerType"] = answer_type
+        correct = _answer_matches(
+            submitted_answer,
+            answer.get("Answer", ""),
+            answer_type,
+        )
 
         if correct:
             participant["Result"] = admin["Result"] = "Correct"

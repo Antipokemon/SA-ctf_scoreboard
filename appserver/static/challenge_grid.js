@@ -269,8 +269,6 @@ require([
             groups[key].push(row);
         });
 
-        // Keep subjects in challenge-number order instead of alphabetizing them.
-        // This preserves the authored learning/attack progression in the CSV.
         subjectOrder.forEach(function(subject) {
             var rows = groups[subject];
             var $section = $("<section/>", {class: "ctf-challenge-section", "data-subject": subject});
