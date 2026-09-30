@@ -1,184 +1,83 @@
-<dashboard version="1.1" script="welcome.js" stylesheet="welcome.css" hideEdit="true" hideTitle="true" theme="dark">
-  <label>Welcome</label>
-
+<dashboard version="1.1" script="ctf_event_context.js,welcome.js" hideEdit="true" theme="dark">
+  <label>Capture the Flag</label>
   <row>
-    <panel depends="$a_token_never_seen$">
-      <table>
-        <search>
-          <query>
-            | makeresults
-            | eval user="$env:user$" `get_user_info_real`
-            | fields *
-          </query>
-          <earliest>0</earliest>
-
-          <finalized>
-            <condition match="'job.resultCount' == 1">
-              <set token="ctf_user">$result.user$</set>
-              <set token="ctf_DisplayUsername">$result.DisplayUsername$</set>
-              <set token="ctf_Team">$result.Team$</set>
-              <set token="ctf_SearchUrl">$result.SearchUrl$</set>
-              <set token="ctf_SearchUrl2">$result.SearchUrl2$</set>
-              <set token="ctf_agreement_accepted">$result.EulaAccepted$</set>
-            </condition>
-          </finalized>
-        </search>
-      </table>
-    </panel>
-
     <panel>
       <html>
-        <div style="float:left; width:70%;">
-          <h1>Welcome to the Capture The Flag (CTF) Competition</h1>
+        <div id="ctf-context-error" style="display:none; padding:12px; margin-bottom:16px; border:1px solid #d9534f;"></div>
 
-          <div>
-            You'll be presented with realistic scenarios, and you will earn
-            points by answering questions of varying difficulty.
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:30px;">
+          <div style="flex:1;">
+            <h1>Welcome to the Capture the Flag (CTF) Competition</h1>
+            <p>You'll be presented with realistic scenarios, and you will earn points by answering questions of varying difficulty.</p>
+
+            <h2>Your Event Details</h2>
+            <table class="table table-bordered" style="width:auto; min-width:420px;">
+              <tbody>
+                <tr><td><strong>CTF Event</strong></td><td><strong>$ctf_event_name$</strong></td></tr>
+                <tr><td><strong>Splunk User</strong></td><td><strong>$env:user$</strong></td></tr>
+                <tr><td>Display Username</td><td><strong>$ctf_DisplayUsername$</strong></td></tr>
+                <tr><td>Team</td><td><strong>$ctf_Team$</strong></td></tr>
+                <tr><td>Search Server URL</td><td><a href="$ctf_SearchUrl$" target="_blank" rel="noopener noreferrer">$ctf_SearchUrl$</a></td></tr>
+                <tr><td>Event State</td><td><strong>$ctf_event_state$</strong></td></tr>
+                <tr><td>Registration State</td><td><strong>$ctf_registration_state$</strong></td></tr>
+                <tr><td>Stealth Mode</td><td><strong>$ctf_stealth_mode$</strong></td></tr>
+                <tr><td>User Agreement</td><td><strong>$ctf_agreement_accepted$</strong></td></tr>
+              </tbody>
+            </table>
           </div>
 
-          <h1>Your Event Details</h1>
-
-          <table>
-            <tr>
-              <td style="font-size: 14px; padding: 10px; border: 1px solid black;">
-                Splunk User
-              </td>
-              <td style="font-size: 18px; font-weight: bold; padding: 10px; border: 1px solid black;">
-                $ctf_user$
-              </td>
-            </tr>
-
-            <tr>
-              <td style="font-size: 14px; padding: 10px; border: 1px solid black;">
-                Display Username
-              </td>
-              <td style="font-size: 18px; font-weight: bold; padding: 10px; border: 1px solid black;">
-                $ctf_DisplayUsername$
-              </td>
-            </tr>
-
-            <tr>
-              <td style="font-size: 14px; padding: 10px; border: 1px solid black;">
-                Team
-              </td>
-              <td style="font-size: 18px; font-weight: bold; padding: 10px; border: 1px solid black;">
-                $ctf_Team$
-              </td>
-            </tr>
-
-            <tr>
-              <td style="font-size: 14px; padding: 10px; border: 1px solid black;">
-                Search Server URL
-                <br/>
-                <text style="font-size: 12px; color: red; font-weight: bold;">
-                  Log in with your CTF credentials
-                </text>
-              </td>
-
-              <td style="font-size: 18px; font-weight: bold; padding: 10px; border: 1px solid black;">
-                <a target="_blank" href="$ctf_SearchUrl$">
-                  $ctf_SearchUrl$
-                </a>
-              </td>
-            </tr>
-
-            <tr>
-              <td style="font-size: 14px; padding: 10px; border: 1px solid black;">
-                Stealth Mode
-              </td>
-              <td style="font-size: 18px; font-weight: bold; padding: 10px; border: 1px solid black;">
-                $ctf_stealth_mode$
-              </td>
-            </tr>
-
-            <tr>
-              <td style="font-size: 14px; padding: 10px; border: 1px solid black;">
-                User Agreement
-              </td>
-              <td style="font-size: 18px; font-weight: bold; padding: 10px; border: 1px solid black;">
-                $ctf_agreement_accepted$
-              </td>
-            </tr>
-          </table>
+          <div style="width:320px; text-align:center;">
+            <img src="$ctf_image_url$" alt="$ctf_event_name$"
+                 style="max-width:300px; max-height:300px; width:100%; object-fit:contain;"/>
+          </div>
         </div>
 
-        <div style="float:right;">
-          <img
-            style="height:350px"
-            src="/static/app/SA-ctf_scoreboard/ctflogo.png"
-          />
-        </div>
-      </html>
-
-      <html>
-        <div style="float:left; width:20%;">
-          <h1>User Agreement</h1>
-
-          <button
-            class="btn btn-primary"
-            title="You must accept the user agreement to participate in the event."
-            id="agreement_modal_button">
-            View/Accept
-          </button>
-
-          <br/>
+        <div style="display:flex; gap:80px; margin-top:24px;">
+          <div>
+            <h2>User Agreement</h2>
+            <button id="agreement_modal_button" type="button" class="btn btn-primary">View/Accept</button>
+          </div>
+          <div>
+            <h2>Stealth Mode</h2>
+            <button id="enable_stealth_button" type="button" class="btn btn-primary">Enable</button>
+            <button id="disable_stealth_button" type="button" class="btn btn-primary">Disable</button>
+          </div>
         </div>
 
-        <div style="float:left; width:20%;">
-          <h1>Stealth Mode</h1>
+        <div style="margin-top:40px;">
+  <h2>Important resources</h2>
 
-          <button
-            class="btn btn-primary"
-            title="When enabled, your real team name will be masked with a random, unattributable stealth-mode string."
-            id="enable_stealth_button">
-            Enable
-          </button>
+  <ul>
+    <li>
+      <a href="questions?ctf_id=$ctf_id$">Questions</a>:
+      Submit answers and review your team's previous responses.
+    </li>
 
-          <button
-            class="btn btn-primary"
-            title="Disable stealth mode."
-            id="disable_stealth_button">
-            Disable
-          </button>
-        </div>
-      </html>
+    <li>
+      <a href="top_10_teams?ctf_id=$ctf_id$">Top 10 Teams</a>:
+      Current top ten teams.
+    </li>
 
-      <html>
-        <h1>Important resources</h1>
+    <li>
+      <a href="AllScores?ctf_id=$ctf_id$">All Teams' Scores</a>:
+      All team scores.
+    </li>
 
-        <ul>
-          <li>
-            <a href="questions">Questions</a>:
-            This is where the magic happens. Submit answers and review your
-            team's previous responses.
-          </li>
+    <li>
+      <a href="event_activity?ctf_id=$ctf_id$">Event Activity</a>:
+      Current event activity.
+    </li>
 
-          <li>
-            <a href="top_10_teams">Top 10 Teams</a>:
-            This leaderboard shows the current top ten teams.
-          </li>
+    <li>
+      <a href="rules?ctf_id=$ctf_id$">Rules</a>:
+      Competition rules.
+    </li>
 
-          <li>
-            <a href="AllScores">All Teams' Scores</a>:
-            All scores including every team in the competition.
-          </li>
-
-          <li>
-            <a href="event_activity">Event Activity</a>:
-            You can view current activity like most active teams, and who's
-            buying hints.
-          </li>
-
-          <li>
-            <a href="rules">Rules</a>:
-            Take a quick look at the event rules if you haven't already.
-          </li>
-
-          <li>
-            Help Menu: Scenarios and other resources that will help you
-            throughout the competition.
-          </li>
-        </ul>
+    <li>
+      Help Menu: Scenarios and other resources that will help you throughout the competition.
+    </li>
+  </ul>
+</div>
       </html>
     </panel>
   </row>

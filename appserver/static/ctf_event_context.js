@@ -11,7 +11,6 @@ require([
 
     function setToken(name, value) {
         defaultTokens.set(name, value);
-
         if (submittedTokens) {
             submittedTokens.set(name, value);
         }
@@ -27,7 +26,6 @@ require([
 
     function chooseEvent(events) {
         var requested = requestedCtfId();
-
         var registered = (events || []).filter(function(event) {
             return event.registered === true;
         });
@@ -38,7 +36,6 @@ require([
                     return registered[i];
                 }
             }
-
             return null;
         }
 
@@ -60,10 +57,7 @@ require([
     function fail(message) {
         setToken("ctf_context_error", message);
         setToken("ctf_context_ready", "0");
-
-        $("#ctf-context-error")
-            .text(message)
-            .show();
+        $("#ctf-context-error").text(message).show();
     }
 
     $.ajax({
@@ -71,37 +65,29 @@ require([
         method: "GET",
         dataType: "json",
         cache: false
-    })
-        .done(function(data) {
-            var selected = chooseEvent(data.events || []);
+    }).done(function(data) {
+        var selected = chooseEvent(data.events || []);
 
-            if (!selected) {
-                fail(
-                    "No registered CTF could be selected. " +
-                    "Open CTF Registration and register for an event."
-                );
+        if (!selected) {
+            fail("No registered CTF could be selected. Open CTF Registration and register for an event.");
+            return;
+        }
 
-                return;
-            }
+        var registration = selected.registration || {};
 
-            var registration = selected.registration || {};
-
-            setToken("ctf_id", selected.ctf_id || "");
-            setToken("ctf_event_name", selected.name || selected.ctf_id || "");
-            setToken("ctf_event_starts", selected.event_starts || "");
-            setToken("ctf_event_ends", selected.event_ends || "");
-            setToken("ctf_registration_state", selected.registration_state || "");
-            setToken("ctf_event_state", selected.event_state || "");
-            setToken("ctf_user", data.username || registration.Username || "");
-            setToken("ctf_DisplayUsername", registration.DisplayUsername || data.username || "");
-            setToken("ctf_Team", registration.Team || registration.DisplayUsername || data.username || "");
-            setToken("ctf_SearchUrl", selected.search_url || "");
-            setToken("ctf_context_ready", "1");
-        })
-        .fail(function(xhr) {
-            fail(
-                "Unable to load your CTF registration context: " +
-                (xhr.responseText || xhr.statusText)
-            );
-        });
+        setToken("ctf_id", selected.ctf_id || "");
+        setToken("ctf_event_name", selected.name || selected.ctf_id || "");
+        setToken("ctf_event_starts", selected.event_starts || "");
+        setToken("ctf_event_ends", selected.event_ends || "");
+        setToken("ctf_registration_state", selected.registration_state || "");
+        setToken("ctf_event_state", selected.event_state || "");
+        setToken("ctf_user", data.username || registration.Username || "");
+        setToken("ctf_DisplayUsername", registration.DisplayUsername || data.username || "");
+        setToken("ctf_Team", registration.Team || registration.DisplayUsername || data.username || "");
+        setToken("ctf_SearchUrl", selected.search_url || "");
+        setToken("ctf_image_url", selected.image_url || "");
+        setToken("ctf_context_ready", "1");
+    }).fail(function(xhr) {
+        fail("Unable to load your CTF registration context: " + (xhr.responseText || xhr.statusText));
+    });
 });
