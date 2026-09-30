@@ -109,12 +109,19 @@ class RepoCompatibilityTests(unittest.TestCase):
 
     def test_event_image_is_bound_from_registration_context(self):
         js = (ROOT / "appserver/static/ctf_event_context.js").read_text()
+        css = (ROOT / "appserver/static/questions.css").read_text()
         self.assertIn('function normalizeEventImageUrl', js)
         self.assertIn(r'/static\/apps\//, "/static/app/"', js)
+        self.assertIn('function eventImageCandidates', js)
+        self.assertIn('new window.Image()', js)
+        self.assertIn('/images/uploads/', js)
         self.assertIn('function setEventImage', js)
         self.assertIn('selected.image_url', js)
         self.assertIn('/static/app/SA-ctf_scoreboard/ctflogo.png', js)
         self.assertIn('$("#ctflogo")', js)
+        self.assertIn('data-ctf-image', js)
+        self.assertIn('object-fit: contain', css)
+        self.assertIn('max-width: 560px', css)
 
     def test_challenge_summary_uses_live_team_score(self):
         questions = (ROOT / "default/data/ui/views/questions.xml").read_text()

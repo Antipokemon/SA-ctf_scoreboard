@@ -496,3 +496,9 @@ The card-based Challenges view binds the event image from `SA-ctf_registration.c
 Challenge-modal hints are retrieved from the scoreboard controller as JSON. The controller reads protected hint text from `SA-ctf_scoreboard_admin`, applies team-scoped hint entitlements, and returns either an unlock action or the previously purchased hint text. The legacy `gethints` search command remains available and receives the caller session key through `passauth = true`.
 
 Answer submission and hint purchase use JSON responses when called from the modal. Validation and permission failures are returned to the modal instead of redirecting an AJAX request to an HTML error page. If no default CTF EULA is configured, answer and hint actions do not require an acceptance record. If a default EULA is configured, acceptance is still required.
+
+## Event artwork on the Challenges page
+
+The Challenges page uses the selected registration event's `image_url`. The client normalizes legacy `/static/apps/...` URLs to Splunk's `/static/app/...` route, verifies the image can load, and retries a source-controlled `/images/<filename>` path when an older event points to `/images/uploads/<filename>`. The built-in shield is used only after the event image candidates fail.
+
+To troubleshoot a missing image, first verify the event record's `image_url`, then verify the corresponding file exists under `SA-ctf_registration/appserver/static/images` (or its `uploads` subdirectory).

@@ -22,8 +22,6 @@ require([
             return "";
         }
 
-        // Splunk serves app static assets from /static/app/<app>/..., not /static/apps/....
-        // Normalize the plural form because older CTF event records may already contain it.
         requested = requested.replace(/^\/static\/apps\//, "/static/app/");
         requested = requested.replace(/^static\/apps\//, "/static/app/");
         if (/^static\/app\//.test(requested)) {
@@ -32,22 +30,63 @@ require([
         return requested;
     }
 
-    function setEventImage(imageUrl) {
-        var fallback = "/static/app/SA-ctf_scoreboard/ctflogo.png";
+    function eventImageCandidates(imageUrl) {
         var requested = normalizeEventImageUrl(imageUrl);
-        var $logo = $("#ctflogo");
+        var candidates = [];
 
-        if (!$logo.length) {
+        function add(value) {
+            if (value && candidates.indexOf(value) === -1) {
+                candidates.push(value);
+            }
+        }
+
+        add(requested);
+
+        // Older uploaded event records used an images/uploads path while some
+        // source-controlled images live directly under appserver/static/images.
+        if (requested.indexOf("/images/uploads/") !== -1) {
+            add(requested.replace("/images/uploads/", "/images/"));
+        }
+
+        return candidates;
+    }
+
+    function writeEventImage(url, attempt) {
+        var $logo = $("#ctflogo");
+        if ($logo.length) {
+            $logo.attr("src", url);
+            $logo.attr("data-ctf-image", url);
             return;
         }
 
-        $logo.off("error.ctfEventImage");
-        $logo.on("error.ctfEventImage", function() {
-            if ($(this).attr("src") !== fallback) {
-                $(this).attr("src", fallback);
+        if ((attempt || 0) < 8) {
+            window.setTimeout(function() {
+                writeEventImage(url, (attempt || 0) + 1);
+            }, 100);
+        }
+    }
+
+    function setEventImage(imageUrl) {
+        var fallback = "/static/app/SA-ctf_scoreboard/ctflogo.png";
+        var candidates = eventImageCandidates(imageUrl);
+        var index = 0;
+
+        function tryNext() {
+            if (index >= candidates.length) {
+                writeEventImage(fallback, 0);
+                return;
             }
-        });
-        $logo.attr("src", requested || fallback);
+
+            var candidate = candidates[index++];
+            var probe = new window.Image();
+            probe.onload = function() {
+                writeEventImage(candidate, 0);
+            };
+            probe.onerror = tryNext;
+            probe.src = candidate;
+        }
+
+        tryNext();
     }
 
     function requestedCtfId() {
@@ -121,6 +160,7 @@ require([
         setToken("ctf_SearchUrl", selected.search_url || "");
         setToken("ctf_image_url", selected.image_url || "");
         setEventImage(selected.image_url || "");
+        $(document).trigger("ctf:event-context-ready", [selected]);
         setToken("ctf_context_ready", "1");
     }).fail(function(xhr) {
         fail("Unable to load your CTF registration context: " + (xhr.responseText || xhr.statusText));
