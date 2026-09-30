@@ -10,9 +10,9 @@
     <query>
 | inputlookup ctf_questions
 | search ctf_id="$ctf_id$"
-| eval Category=coalesce(Category,"Challenges")
+| eval Subject=coalesce(Subject,Category,"Challenges")
 | eval ChallengeID=coalesce(ChallengeID,printf("Q%03d",Number))
-| fields Number Question BasePoints Category ChallengeID
+| fields Number Question BasePoints Subject ChallengeID
 | join type=left Number
     [ search index=scoreboard
              ctf_id="$ctf_id$"
@@ -35,7 +35,7 @@
         IncorrectAttempts&gt;0,"Incorrect",
         true(),"Unanswered"
   )
-| fields Number ChallengeID Category Question Status BasePoints Attempts IncorrectAttempts CorrectAttempts QuestionScore
+| fields Number ChallengeID Subject Question Status BasePoints Attempts IncorrectAttempts CorrectAttempts QuestionScore
 | sort 0 + Number
     </query>
     <earliest>0</earliest>
@@ -105,6 +105,7 @@
   <row id="ctf_challenges_row">
     <panel>
       <html>
+        <div id="ctf_event_gate" class="ctf-event-gate" style="display:none;"></div>
         <div class="ctf-challenge-toolbar">
           <div class="ctf-filter-group" role="group" aria-label="Challenge status filter">
             <button type="button" class="ctf-filter is-active" data-filter="all">All</button>
